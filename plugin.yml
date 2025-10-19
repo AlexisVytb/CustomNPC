@@ -1,0 +1,40 @@
+name: CustomNPC
+version: 2.0.0
+main: CustomNPC\Main
+api: 5.0.0
+author: AlexisV
+description: Plugin de NPCs personnalisables avec IA
+
+commands:
+  npcwand:
+    description: Obtenir la baguette NPC
+    permission: customnpc.wand
+  npcspawn:
+    description: Créer un NPC
+    permission: customnpc.spawn
+  npcrotate:
+    description: Change la rotation du npc
+    usage: /npcrotate <uuid>
+    permission: customnpc.rotate
+  npcarmor:
+    description: Configurer l'armure d'un NPC
+    usage: /npcarmor <uuid>
+    permission: customnpc.armor
+  npclist:
+    description: Lister tous les NPCs
+    permission: customnpc.list
+
+
+permissions:
+  customnpc.wand:
+    description: Permet d'obtenir la baguette NPC
+    default: op
+  customnpc.spawn:
+    description: Permet de créer un NPC
+    default: op
+  customnpc.rotate:
+    description: Permet de supprimer un NPC
+    default: op
+  customnpc.armor:
+    description: Permet de configurer l'armure d'un NPC
+    default: op
