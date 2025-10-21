@@ -38,7 +38,7 @@ Lorsque vous utilisez la baguette (`/npcwand`), une **interface intuitive** s’
 
 ## 🚀 Installation
 
-1. Téléchargez le plugin depuis la page <>.  
+1. Téléchargez le plugin depuis la page [Poggit](https://poggit.pmmp.io/ci/AlexisVytb/CustomNPC/CustomNPC).  
 2. Glissez le fichier `.phar` dans le dossier `plugins` de votre serveur **PocketMine-MP 5**.  
 3. Redémarrez votre serveur.  
 4. Profitez de vos PNJ personnalisés 🧍✨
