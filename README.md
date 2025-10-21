@@ -71,4 +71,3 @@ Vous êtes libre de le modifier et de le redistribuer tant que la licence est co
 ---
 
 ✨ _Développez des PNJ vivants et interactifs sur votre serveur Minecraft !_ 🧙
-Attention pour éviter les crashs veuillez ne pas utilisé la fonctionnalité des commandes !
