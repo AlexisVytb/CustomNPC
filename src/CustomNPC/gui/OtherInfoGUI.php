@@ -37,15 +37,6 @@ class OtherInfoGUI {
                 "canBeHit" => $formData[3]
             ];
             
-            // Commandes
-            $commandsRaw = $formData[4] ?? "";
-            if(!empty(trim($commandsRaw))) {
-                $commands = array_filter(array_map('trim', explode(";", $commandsRaw)));
-                $updates["commands"] = $commands;
-            } else {
-                $updates["commands"] = [];
-            }
-            
             // Drops
             $dropsRaw = $formData[5] ?? "";
             if(!empty(trim($dropsRaw))) {
@@ -70,7 +61,6 @@ class OtherInfoGUI {
         $form->addToggle("Peut être frappé", $data["canBeHit"] ?? true);
         $form->addInput("Rotation Yaw (0-360°)", "ex: 90", (string)($data["yaw"] ?? 0.0));
         $form->addInput("Rotation Pitch (-90 à 90°)", "ex: 0", (string)($data["pitch"] ?? 0.0));
-        $form->addInput("Commandes si touché (séparées par ;)", "ex: give {player} diamond 1", implode(";", $data["commands"] ?? []));
         $form->addInput("Items à drop (séparés par ;)", "ex: diamond:0;iron_ingot", implode(";", $data["drops"] ?? []));
 
         $player->sendForm($form);
