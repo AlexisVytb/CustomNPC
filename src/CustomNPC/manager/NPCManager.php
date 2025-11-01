@@ -111,13 +111,17 @@ class NPCManager {
         $pitch = $data["pitch"] ?? 0.0;
         $location = new Location($pos["x"], $pos["y"], $pos["z"], $world, $yaw, $pitch);
 
-        $skin = $this->skinManager->loadSkin($data["skin"] ?? "", null);
+        // CHANGEMENT IMPORTANT : Charger le skin avant de créer l'entité
+        $skinPath = $data["skin"] ?? "";
+        $skin = $this->skinManager->loadSkin($skinPath, null);
+        
         $nbt = CompoundTag::create();
         
         if($data["immobile"] ?? false) {
             $nbt->setByte("Immobile", 1);
         }
         
+        // Créer l'entité Human avec le skin
         $entity = new Human($location, $skin, $nbt);
 
         $maxHealth = (float)($data["maxHealth"] ?? 100.0);
@@ -135,7 +139,12 @@ class NPCManager {
         }
         
         $this->equipArmor($entity, $data["armor"] ?? []);
+        
+        // IMPORTANT : Spawn l'entité d'abord
         $entity->spawnToAll();
+        
+        // NOUVEAU : Forcer le rafraîchissement du skin après le spawn
+        $this->refreshSkin($entity, $skin);
 
         $entityId = $entity->getId();
         $this->npcData[$uuid]["runtimeId"] = $entityId;
@@ -143,6 +152,30 @@ class NPCManager {
         
         $this->updateNameTag($entity, $uuid);
         $this->scheduleRefresh($entity, $uuid, $data, $maxHealth, $currentHealth);
+    }
+
+    /**
+     * Force le rafraîchissement du skin pour tous les joueurs
+     */
+    private function refreshSkin(Human $entity, \pocketmine\entity\Skin $skin): void {
+        // Attendre un tick pour que l'entité soit bien spawn
+        $this->plugin->getScheduler()->scheduleDelayedTask(new class($entity, $skin) extends Task {
+            private $entity;
+            private $skin;
+
+            public function __construct($entity, $skin) {
+                $this->entity = $entity;
+                $this->skin = $skin;
+            }
+
+            public function onRun(): void {
+                if(!$this->entity->isClosed()) {
+                    // Re-set le skin et force l'envoi aux joueurs
+                    $this->entity->setSkin($this->skin);
+                    $this->entity->sendSkin();
+                }
+            }
+        }, 2);
     }
 
     private function scheduleRefresh(Human $entity, string $uuid, array $data, float $maxHealth, float $currentHealth): void {
@@ -199,6 +232,9 @@ class NPCManager {
                             $item = ItemParser::parse($armor["hand"]);
                             if($item !== null) $this->entity->getInventory()->setItemInHand($item);
                         }
+                        
+                        // NOUVEAU : Re-envoyer le skin pour être sûr
+                        $this->entity->sendSkin();
                         
                         $this->manager->updateNameTag($this->entity, $this->uuid);
                     }
@@ -397,5 +433,42 @@ class NPCManager {
         $data["yaw"] = $yaw;
         $data["pitch"] = $pitch;
         return $data;
+    }
+    
+    /**
+     * NOUVEAU : Méthode pour changer le skin d'un NPC existant
+     */
+    public function changeSkin(string $uuid, string $skinPath): bool {
+        if(!isset($this->npcData[$uuid])) return false;
+        
+        try {
+            // Charger le nouveau skin
+            $skin = $this->skinManager->loadSkin($skinPath, null);
+            
+            // Mettre à jour les données
+            $this->npcData[$uuid]["skin"] = $skinPath;
+            
+            // Obtenir l'entité
+            $data = $this->npcData[$uuid];
+            $world = $this->plugin->getServer()->getWorldManager()->getWorldByName($data["position"]["world"]);
+            
+            if($world !== null) {
+                $entity = $world->getEntity($data["runtimeId"] ?? 0);
+                
+                if($entity instanceof Human && !$entity->isClosed()) {
+                    // Appliquer le nouveau skin
+                    $entity->setSkin($skin);
+                    $entity->sendSkin();
+                    
+                    $this->saveNPC($uuid);
+                    return true;
+                }
+            }
+            
+            return false;
+        } catch(\Exception $e) {
+            $this->plugin->getLogger()->error("Erreur changement de skin: " . $e->getMessage());
+            return false;
+        }
     }
 }
