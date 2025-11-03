@@ -28,6 +28,18 @@ class NPCManager {
         $this->skinManager = new SkinManager($plugin);
     }
 
+    /**
+     * Retourne l'instance du plugin
+     * ✅ AJOUT PM5 : Nécessaire pour OtherInfoGUI
+     */
+    public function getPlugin(): Main {
+        return $this->plugin;
+    }
+
+    public function getSkinManager(): SkinManager {
+        return $this->skinManager;
+    }
+
     public function loadFromDatabase(): void {
         $this->npcData = $this->database->loadAllNPCs();
         
@@ -111,9 +123,25 @@ class NPCManager {
         $pitch = $data["pitch"] ?? 0.0;
         $location = new Location($pos["x"], $pos["y"], $pos["z"], $world, $yaw, $pitch);
 
-        // CHANGEMENT IMPORTANT : Charger le skin avant de créer l'entité
+        // Charger le skin
         $skinPath = $data["skin"] ?? "";
-        $skin = $this->skinManager->loadSkin($skinPath, null);
+        
+        $this->plugin->getLogger()->info("§eChargement du skin pour NPC {$uuid}: '{$skinPath}'");
+        
+        // Si on a des données de skin sauvegardées, les utiliser directement
+        if(isset($data["savedSkin"]) && is_array($data["savedSkin"]) && !empty($data["savedSkin"]["skinData"])) {
+            $this->plugin->getLogger()->info("§aUtilisation du skin sauvegardé");
+            $skin = $this->loadSavedSkin($data["savedSkin"]);
+        } else {
+            $this->plugin->getLogger()->info("§eChargement du skin depuis: {$skinPath}");
+            $skin = $this->skinManager->loadSkin($skinPath, null);
+            
+            // Si c'est un skin de joueur et qu'il a été chargé avec succès, le sauvegarder
+            if(strpos($skinPath, "player:") === 0 && $skin->getSkinId() !== "Standard_Steve") {
+                $this->plugin->getLogger()->info("§aSauvegarde du skin de joueur...");
+                $this->saveSkinData($uuid, $skin);
+            }
+        }
         
         $nbt = CompoundTag::create();
         
@@ -143,7 +171,7 @@ class NPCManager {
         // IMPORTANT : Spawn l'entité d'abord
         $entity->spawnToAll();
         
-        // NOUVEAU : Forcer le rafraîchissement du skin après le spawn
+        // Forcer le rafraîchissement du skin après le spawn
         $this->refreshSkin($entity, $skin);
 
         $entityId = $entity->getId();
@@ -158,7 +186,10 @@ class NPCManager {
      * Force le rafraîchissement du skin pour tous les joueurs
      */
     private function refreshSkin(Human $entity, \pocketmine\entity\Skin $skin): void {
-        // Attendre un tick pour que l'entité soit bien spawn
+        // TEMPORAIREMENT DÉSACTIVÉ pour debug
+        // Le despawn/respawn peut causer des crashes
+        
+        // Simple envoi du skin sans despawn
         $this->plugin->getScheduler()->scheduleDelayedTask(new class($entity, $skin) extends Task {
             private $entity;
             private $skin;
@@ -170,12 +201,55 @@ class NPCManager {
 
             public function onRun(): void {
                 if(!$this->entity->isClosed()) {
-                    // Re-set le skin et force l'envoi aux joueurs
                     $this->entity->setSkin($this->skin);
                     $this->entity->sendSkin();
                 }
             }
-        }, 2);
+        }, 5);
+    }
+
+    /**
+     * Sauvegarde les données du skin dans la config du NPC
+     */
+    private function saveSkinData(string $uuid, \pocketmine\entity\Skin $skin): void {
+        $this->npcData[$uuid]["savedSkin"] = [
+            "skinId" => $skin->getSkinId(),
+            "skinData" => base64_encode($skin->getSkinData()),
+            "capeData" => base64_encode($skin->getCapeData()),
+            "geometryName" => $skin->getGeometryName(),
+            "geometryData" => base64_encode($skin->getGeometryData())
+        ];
+        $this->saveNPC($uuid);
+    }
+    
+    /**
+     * Charge un skin depuis les données sauvegardées
+     */
+    private function loadSavedSkin(array $savedSkin): \pocketmine\entity\Skin {
+        $skinId = $savedSkin["skinId"] ?? "CustomNPC";
+        $skinData = base64_decode($savedSkin["skinData"] ?? "");
+        $capeData = base64_decode($savedSkin["capeData"] ?? "");
+        $geometryName = $savedSkin["geometryName"] ?? "";
+        $geometryData = base64_decode($savedSkin["geometryData"] ?? "");
+        
+        $this->plugin->getLogger()->info("§eChargement skin sauvegardé:");
+        $this->plugin->getLogger()->info("  - ID: {$skinId}");
+        $this->plugin->getLogger()->info("  - Data length: " . strlen($skinData));
+        $this->plugin->getLogger()->info("  - Geometry: {$geometryName}");
+        
+        // Vérifier que les données ne sont pas vides
+        if(strlen($skinData) === 0) {
+            $this->plugin->getLogger()->error("§cSkin data vide ! Utilisation du skin par défaut");
+            return $this->skinManager->loadSkin("", null);
+        }
+        
+        return new \pocketmine\entity\Skin(
+            $skinId,
+            $skinData,
+            $capeData,
+            $geometryName,
+            $geometryData
+        );
     }
 
     private function scheduleRefresh(Human $entity, string $uuid, array $data, float $maxHealth, float $currentHealth): void {
@@ -233,7 +307,7 @@ class NPCManager {
                             if($item !== null) $this->entity->getInventory()->setItemInHand($item);
                         }
                         
-                        // NOUVEAU : Re-envoyer le skin pour être sûr
+                        // Re-envoyer le skin pour être sûr
                         $this->entity->sendSkin();
                         
                         $this->manager->updateNameTag($this->entity, $this->uuid);
@@ -436,7 +510,7 @@ class NPCManager {
     }
     
     /**
-     * NOUVEAU : Méthode pour changer le skin d'un NPC existant
+     * Méthode pour changer le skin d'un NPC existant
      */
     public function changeSkin(string $uuid, string $skinPath): bool {
         if(!isset($this->npcData[$uuid])) return false;
@@ -447,6 +521,11 @@ class NPCManager {
             
             // Mettre à jour les données
             $this->npcData[$uuid]["skin"] = $skinPath;
+            
+            // Sauvegarder les données du skin si c'est un skin de joueur
+            if(strpos($skinPath, "player:") === 0) {
+                $this->saveSkinData($uuid, $skin);
+            }
             
             // Obtenir l'entité
             $data = $this->npcData[$uuid];
