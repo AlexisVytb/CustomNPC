@@ -1,5 +1,5 @@
 name: CustomNPC
-version: 2.0.0
+version: 2.1.0
 main: CustomNPC\Main
 api: 5.0.0
 author: AlexisV
@@ -37,4 +37,7 @@ permissions:
     default: op
   customnpc.armor:
     description: Permet de configurer l'armure d'un NPC
+    default: op
+  customnpc.list:
+    description: Permet de voir la list des ncps
     default: op
