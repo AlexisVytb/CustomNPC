@@ -19,10 +19,9 @@ Un plugin **Custom NPC** pour **PocketMine-MP 5** qui permet d’ajouter, gérer
 
 Lorsque vous utilisez la baguette (`/npcwand`), une **interface intuitive** s’ouvre avec plusieurs catégories :
 
-- 📝 **Info** – Informations générales sur le PNJ  
+- 📝 **Info** – Informations générales sur le PNJ + Contrôle des npcs
 - ⚔️ **Combat** – Paramètres liés aux interactions de combat  
 - 📊 **Autre Info** – Détails supplémentaires et personnalisations  
-- 🌐 **Info Générale** – Contrôle complet des propriétés du PNJ
 
 ---
 
