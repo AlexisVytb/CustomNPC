@@ -10,12 +10,10 @@ class ItemParser {
 
     public static function parse(string $itemString): ?Item {
         if(empty($itemString)) return null;
-        
-        // Essayer le parser moderne
+
         $item = StringToItemParser::getInstance()->parse($itemString);
         if($item !== null) return $item;
-        
-        // Essayer le parser legacy (ID:META)
+
         $parts = explode(":", $itemString);
         if(count($parts) >= 1) {
             $id = $parts[0];

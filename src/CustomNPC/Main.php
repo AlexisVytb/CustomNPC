@@ -9,6 +9,7 @@ use pocketmine\command\CommandSender;
 use CustomNPC\manager\NPCManager;
 use CustomNPC\manager\DatabaseManager;
 use CustomNPC\listener\NPCEventListener;
+use CustomNPC\listener\NPCTapListener;
 use CustomNPC\task\NPCBehaviorTask;
 use CustomNPC\task\NPCRegenTask;
 use CustomNPC\task\AutoSaveTask;
@@ -29,9 +30,15 @@ class Main extends PluginBase {
 
         $this->npcManager->loadFromDatabase();
 
-        $this->getServer()->getPluginManager()->registerEvents(new NPCEventListener($this->npcManager), $this);
+        $this->getServer()->getPluginManager()->registerEvents(
+            new NPCEventListener($this->npcManager), 
+            $this
+        );
+        $this->getServer()->getPluginManager()->registerEvents(
+            new NPCTapListener($this->npcManager),
+            $this
+        );
 
-        // Charger les NPCs si des joueurs sont déjà connectés
         $this->getScheduler()->scheduleDelayedTask(new class($this, $this->npcManager) extends \pocketmine\scheduler\Task {
             private $plugin;
             private $npcManager;
@@ -65,7 +72,7 @@ class Main extends PluginBase {
         $this->getScheduler()->scheduleRepeatingTask(new NPCRegenTask($this->npcManager), 20);
         $this->getScheduler()->scheduleRepeatingTask(new AutoSaveTask($this->npcManager), 1200);
 
-        $this->getLogger()->info("§aCustomNPC activé !");
+        $this->getLogger()->info("§aCustomNPC activé avec système de commandes !");
     }
 
     public function onDisable(): void {

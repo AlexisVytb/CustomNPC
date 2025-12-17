@@ -23,7 +23,6 @@ class NPCBehaviorTask extends Task {
         $npcData = $this->npcManager->getAllNPCData();
 
         foreach($npcData as $uuid => $data) {
-            // Ne pas faire bouger les NPCs immobiles
             if($data["immobile"] ?? false) continue;
             
             if(!($data["aggressive"] ?? false)) continue;
@@ -45,8 +44,6 @@ class NPCBehaviorTask extends Task {
 
     private function findTarget(Living $npc, string $uuid, array $data, $world): ?\pocketmine\player\Player {
         $target = null;
-        
-        // Vérifier si on a déjà une cible
         $targetName = $this->npcManager->getTarget($uuid);
         if($targetName !== null) {
             $target = \CustomNPC\Main::getInstance()->getServer()->getPlayerExact($targetName);
@@ -56,7 +53,6 @@ class NPCBehaviorTask extends Task {
             }
         }
 
-        // Chercher une nouvelle cible
         if($target === null) {
             $minDistance = Constants::NPC_AGGRO_RADIUS;
             foreach($world->getPlayers() as $player) {
@@ -73,13 +69,11 @@ class NPCBehaviorTask extends Task {
 
     private function handleMovementAndAttack(Living $npc, $target, string $uuid, array $data, $world): void {
         $distance = $npc->getPosition()->distance($target->getPosition());
-        
-        // Déplacement
+
         if($distance > Constants::NPC_FOLLOW_DISTANCE) {
             $this->moveTowardsTarget($npc, $target, $data, $world);
         }
 
-        // Attaque
         if($distance < Constants::NPC_ATTACK_RANGE && $this->npcManager->canAttack($uuid)) {
             $event = new EntityDamageByEntityEvent($npc, $target, EntityDamageEvent::CAUSE_ENTITY_ATTACK, $data["attackDamage"] ?? 1);
             $target->attack($event);
@@ -103,8 +97,7 @@ class NPCBehaviorTask extends Task {
         $newX = $npc->getPosition()->x + ($dirX * $speed);
         $newY = $npc->getPosition()->y;
         $newZ = $npc->getPosition()->z + ($dirZ * $speed);
-        
-        // Vérification des collisions
+
         $blockInFront = $world->getBlockAt((int)$newX, (int)$newY, (int)$newZ);
         $blockAbove = $world->getBlockAt((int)$newX, (int)($newY + 1), (int)$newZ);
         $blockBelow = $world->getBlockAt((int)$newX, (int)($newY - 1), (int)$newZ);
@@ -117,7 +110,7 @@ class NPCBehaviorTask extends Task {
                 $shouldJump = true;
             } else {
                 $canMove = false;
-                // Essayer de contourner
+
                 $sideX = $npc->getPosition()->x + ($dirZ * $speed);
                 $sideZ = $npc->getPosition()->z - ($dirX * $speed);
                 $blockSide = $world->getBlockAt((int)$sideX, (int)$newY, (int)$sideZ);

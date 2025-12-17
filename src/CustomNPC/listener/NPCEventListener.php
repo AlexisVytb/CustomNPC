@@ -32,7 +32,6 @@ class NPCEventListener implements Listener {
     public function onPlayerJoin(PlayerJoinEvent $event): void {
         $player = $event->getPlayer();
         
-        // Étape 1: Vérifier et respawn les NPCs manquants
         Main::getInstance()->getScheduler()->scheduleDelayedTask(new class($this->npcManager, $player) extends Task {
             private $npcManager;
             private $player;
@@ -49,8 +48,7 @@ class NPCEventListener implements Listener {
                 
                 foreach($this->npcManager->getAllNPCData() as $uuid => $data) {
                     if($data["position"]["world"] !== $world->getFolderName()) continue;
-                    
-                    // Nettoyer les doublons
+
                     $pos = $data["position"];
                     $bb = new \pocketmine\math\AxisAlignedBB(
                         $pos["x"] - 0.5, $pos["y"] - 0.5, $pos["z"] - 0.5,
@@ -67,8 +65,6 @@ class NPCEventListener implements Listener {
                             }
                         }
                     }
-                    
-                    // Vérifier si l'entité existe
                     $entityId = $data["runtimeId"] ?? 0;
                     $entity = null;
                     
@@ -84,8 +80,6 @@ class NPCEventListener implements Listener {
                 }
             }
         }, 20);
-        
-        // Étape 2: Forcer l'envoi des données visuelles
         Main::getInstance()->getScheduler()->scheduleDelayedTask(new class($this->npcManager, $player) extends Task {
             private $npcManager;
             private $player;
@@ -188,17 +182,12 @@ class NPCEventListener implements Listener {
         }
     }
 
-    /**
-     * @priority HIGHEST
-     * @ignoreCancelled false
-     */
     public function onEntityDamage(EntityDamageEvent $event): void {
         $entity = $event->getEntity();
         $entityId = $entity->getId();
 
         $npcUuid = $this->npcManager->findNPCByEntityId($entityId);
-        
-        // Fallback: chercher par position
+
         if($npcUuid === null && $entity instanceof \pocketmine\entity\Human) {
             $pos = $entity->getPosition();
             foreach($this->npcManager->getAllNPCData() as $uuid => $data) {
@@ -218,27 +207,34 @@ class NPCEventListener implements Listener {
         }
         
         if($npcUuid === null) return;
-
+        
         $npcData = $this->npcManager->getNPCData($npcUuid);
         if($npcData === null) return;
-
+        
         $canBeHit = $npcData["canBeHit"] ?? true;
         
-        if(!$canBeHit) {
-            $event->cancel();
-            
-            if($event instanceof EntityDamageByEntityEvent) {
-                $damager = $event->getDamager();
-                if($damager instanceof Player) {
-                    $item = $damager->getInventory()->getItemInHand();
-                    if($item->getCustomName() === Constants::NPC_WAND_NAME) {
-                        (new MainGUI($this->npcManager))->open($damager, $npcUuid);
-                    }
-                }
+        if(!$canBeHit){
+    $event->cancel();
+
+    if($event instanceof EntityDamageByEntityEvent){
+        $damager = $event->getDamager();
+
+        if($damager instanceof Player){
+            $item = $damager->getInventory()->getItemInHand();
+
+            if($item->getCustomName() === Constants::NPC_WAND_NAME){
+                (new MainGUI($this->npcManager))->open($damager, $npcUuid);
+                return;
             }
-            
-            return;
+
+            if(($npcData["commandEnabled"] ?? false) === true){
+                $this->executeCommands($npcData["commands"] ?? [], $damager);
+            }
         }
+    }
+
+    return;
+}
 
         if($event instanceof EntityDamageByEntityEvent) {
             $this->handleEntityDamageByEntity($event, $npcUuid, $npcData, $entity);
@@ -304,14 +300,16 @@ class NPCEventListener implements Listener {
             }
         }
 
-        if($damager->getId() === $entity->getId()) {
-            $event->setBaseDamage($npcData["attackDamage"] ?? 1);
+        $victim = $event->getEntity();
 
-            if($event->getEntity() instanceof Player) {
-                $effectId = $npcData["effectOnHit"] ?? "";
-                if($effectId !== "") {
-                    $this->applyEffect($event->getEntity(), $effectId);
-                }
+        if($victim instanceof Player && !($damager instanceof Player)){
+            if(isset($npcData["attackDamage"])){
+                $event->setBaseDamage((float) $npcData["attackDamage"]);
+            }
+
+            $effectId = $npcData["effectOnHit"] ?? "";
+            if($effectId !== ""){
+                $this->applyEffect($victim, $effectId);
             }
         }
     }
@@ -328,7 +326,6 @@ class NPCEventListener implements Listener {
                         $cmd
                     );
                 } catch(\Exception $e) {
-                    // Silencieux
                 }
             }
         }

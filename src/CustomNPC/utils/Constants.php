@@ -29,5 +29,5 @@ class Constants {
     public const NPC_AGGRO_RADIUS = 15;
     public const NPC_ATTACK_RANGE = 2;
     public const NPC_FOLLOW_DISTANCE = 1.5;
-    public const NPC_DEAGGRO_DISTANCE = 20;
+    public const NPC_DEAGGRO_DISTANCE = 10;
 }

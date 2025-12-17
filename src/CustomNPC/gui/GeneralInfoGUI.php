@@ -38,7 +38,8 @@ class GeneralInfoGUI {
                 "subtitle" => $formData[4],
                 "aggressive" => $formData[5],
                 "autoRespawn" => $formData[6],
-                "canRegen" => $formData[7]
+                "canRegen" => $formData[7],
+                "commandEnabled" => $formData[9]
             ];
             
             if($formData[7]) {
@@ -63,6 +64,7 @@ class GeneralInfoGUI {
         $form->addToggle("Respawn automatique", $data["autoRespawn"] ?? false);
         $form->addToggle("Peut se régénérer", $data["canRegen"] ?? false);
         $form->addInput("Régénération (coeurs/seconde)", "1-100", (string)($data["regenAmount"] ?? 1));
+        $form->addToggle("§eActiver les commandes", $data["commandEnabled"] ?? false);
 
         $player->sendForm($form);
     }

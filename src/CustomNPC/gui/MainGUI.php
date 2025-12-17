@@ -31,19 +31,16 @@ class MainGUI {
                     (new OtherInfoGUI($this->npcManager))->open($player, $uuid);
                     break;
                 case 3:
-                    if($uuid !== null) {
-                        $this->giveNPCItem($player, $uuid);
-                    }
+                    $this->giveNPCItem($player, $uuid);
                     break;
                 case 4:
-                    if($uuid !== null) {
-                        $this->duplicateNPC($player, $uuid);
-                    }
+                    $this->duplicateNPC($player, $uuid);
                     break;
                 case 5:
-                    if($uuid !== null) {
-                        $this->deleteNPCConfirm($player, $uuid);
-                    }
+                    $this->deleteNPCConfirm($player, $uuid);
+                    break;
+                case 6:
+                    (new CommandInfoGUI($this->npcManager))->open($player, $uuid);
                     break;
             }
         });
@@ -56,35 +53,45 @@ class MainGUI {
         } else {
             $form->setContent("§7Clique sur un NPC avec la wand\n§7ou crée-en un nouveau");
         }
-        
-        $form->addButton("§aInfo Général\n§7Vie, vitesse, nom...");
-        $form->addButton("§cInfo Combat\n§7Attaques, armure...");
-        $form->addButton("§bInfo Autres\n§7Taille, skin...");
-        
-        if($uuid !== null) {
-            $form->addButton("§ePrendre l'item\n§7Récupérer le NPC");
-            $form->addButton("§dDupliquer\n§7Copier ce NPC");
-            $form->addButton("§4Supprimer\n§7Effacer ce NPC");
+        if($uuid === null) {
+            $player->sendMessage("§cAucun NPC sélectionné !");
+            return;
         }
+
+        $data = $this->npcManager->getNPCData($uuid);
+        if($data === null) {
+            $player->sendMessage("§cNPC introuvable !");
+            return;
+        }
+        
+        $form->addButton("§aInfo Général\n§0Vie, vitesse, nom...");
+        $form->addButton("§cInfo Combat\n§0Attaques, armure...");
+        $form->addButton("§bInfo Autres\n§0Taille, skin...");
+        $form->addButton("§ePrendre l'item\n§0Récupérer le NPC");
+        $form->addButton("§dDupliquer\n§0Copier ce NPC");
+        $form->addButton("§4Supprimer\n§0Effacer ce NPC");
+        $form->addButton("§sCommandes\n§0Voir les commandes");
 
         $player->sendForm($form);
     }
 
-    private function giveNPCItem(Player $player, string $uuid): void {
+    private function giveNPCItem(Player $player, ?string $uuid): void {
+        if($uuid === null) {
+            $player->sendMessage("§cNPC introuvable !");
+            return;
+        }
         $data = $this->npcManager->getNPCData($uuid);
         if($data === null) {
             $player->sendMessage("§cNPC introuvable !");
             return;
         }
 
-        // Despawn le NPC
         $world = $player->getWorld();
         $entity = $world->getEntity($data["runtimeId"] ?? 0);
         if($entity !== null) {
             $entity->flagForDespawn();
         }
 
-        // Créer l'item
         $item = VanillaItems::EMERALD()->setCustomName(Constants::NPC_ITEM_PREFIX . ($data["title"] ?? "NPC"));
         $lore = [
             "§7UUID: §e" . $uuid,
@@ -104,7 +111,11 @@ class MainGUI {
         $player->sendMessage("§aTu as récupéré le NPC en item !");
     }
 
-    private function duplicateNPC(Player $player, string $uuid): void {
+    private function duplicateNPC(Player $player, ?string $uuid): void {
+        if($uuid === null) {
+            $player->sendMessage("§cNPC introuvable !");
+            return;
+        }
         $data = $this->npcManager->getNPCData($uuid);
         if($data === null) {
             $player->sendMessage("§cNPC introuvable !");
@@ -126,7 +137,11 @@ class MainGUI {
         $player->sendMessage("§aNPC dupliqué ! Nouveau UUID: §e" . $newUuid);
     }
 
-    private function deleteNPCConfirm(Player $player, string $uuid): void {
+    private function deleteNPCConfirm(Player $player, ?string $uuid): void {
+        if($uuid === null) {
+            $player->sendMessage("§cNPC introuvable !");
+            return;
+        }
         $data = $this->npcManager->getNPCData($uuid);
         if($data === null) {
             $player->sendMessage("§cNPC introuvable !");

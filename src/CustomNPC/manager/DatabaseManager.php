@@ -43,6 +43,7 @@ class DatabaseManager {
             immobile INTEGER,
             auto_respawn INTEGER,
             can_be_hit INTEGER,
+            command_enabled INTEGER,
             commands TEXT,
             drops TEXT,
             armor_helmet TEXT,
@@ -51,6 +52,10 @@ class DatabaseManager {
             armor_boots TEXT,
             armor_hand TEXT
         )");
+        try {
+            $this->database->exec("ALTER TABLE npcs ADD COLUMN command_enabled INTEGER DEFAULT 0");
+        } catch(\Exception $e) {
+        }
     }
 
     public function loadAllNPCs(): array {
@@ -88,6 +93,7 @@ class DatabaseManager {
                 "immobile" => (bool)$row["immobile"],
                 "autoRespawn" => (bool)$row["auto_respawn"],
                 "canBeHit" => $canBeHit,
+                "commandEnabled" => (bool)($row["command_enabled"] ?? 0),
                 "commands" => json_decode($row["commands"], true) ?: [],
                 "drops" => json_decode($row["drops"], true) ?: [],
                 "armor" => [
@@ -96,7 +102,9 @@ class DatabaseManager {
                     "leggings" => $row["armor_leggings"],
                     "boots" => $row["armor_boots"],
                     "hand" => $row["armor_hand"]
-                ]
+                ],
+                "yaw" => (float)$row["yaw"],
+                "pitch" => (float)$row["pitch"],
             ];
         }
         
@@ -106,14 +114,78 @@ class DatabaseManager {
     public function saveNPC(string $uuid, array $data): void {
         $pos = $data["position"];
         
-        $stmt = $this->database->prepare("INSERT OR REPLACE INTO npcs VALUES (
-            :uuid, :title, :subtitle, :pos_x, :pos_y, :pos_z, :world,
-            :health, :max_health, :speed, :aggressive, :attack_speed, :attack_damage,
-            :arrow_attack, :arrow_speed, :effect_on_hit, :can_regen, :regen_amount,
-            :size, :skin, :immobile, :auto_respawn, :can_be_hit,
-            :commands, :drops, :armor_helmet, :armor_chestplate, :armor_leggings,
-            :armor_boots, :armor_hand
-        )");
+        $stmt = $this->database->prepare("
+        INSERT OR REPLACE INTO npcs (
+        uuid,
+        title,
+        subtitle,
+        pos_x,
+        pos_y,
+        pos_z,
+        world,
+        yaw,
+        pitch,
+        health,
+        max_health,
+        speed,
+        aggressive,
+        attack_speed,
+        attack_damage,
+        arrow_attack,
+        arrow_speed,
+        effect_on_hit,
+        can_regen,
+        regen_amount,
+        size,
+        skin,
+        immobile,
+        auto_respawn,
+        can_be_hit,
+        command_enabled,
+        commands,
+        drops,
+        armor_helmet,
+        armor_chestplate,
+        armor_leggings,
+        armor_boots,
+        armor_hand
+        ) VALUES (
+            :uuid,
+            :title,
+            :subtitle,
+            :pos_x,
+            :pos_y,
+            :pos_z,
+            :world,
+            :yaw,
+            :pitch,
+            :health,
+            :max_health,
+            :speed,
+            :aggressive,
+            :attack_speed,
+            :attack_damage,
+            :arrow_attack,
+            :arrow_speed,
+            :effect_on_hit,
+            :can_regen,
+            :regen_amount,
+            :size,
+            :skin,
+            :immobile,
+            :auto_respawn,
+            :can_be_hit,
+            :command_enabled,
+            :commands,
+            :drops,
+            :armor_helmet,
+            :armor_chestplate,
+            :armor_leggings,
+            :armor_boots,
+            :armor_hand
+        )
+");
+
         
         $stmt->bindValue(":uuid", $uuid);
         $stmt->bindValue(":title", $data["title"]);
@@ -122,6 +194,8 @@ class DatabaseManager {
         $stmt->bindValue(":pos_y", $pos["y"]);
         $stmt->bindValue(":pos_z", $pos["z"]);
         $stmt->bindValue(":world", $pos["world"]);
+        $stmt->bindValue(":yaw", $data["yaw"] ?? 0.0);
+        $stmt->bindValue(":pitch", $data["pitch"] ?? 0.0);
         $stmt->bindValue(":health", $data["health"]);
         $stmt->bindValue(":max_health", $data["maxHealth"]);
         $stmt->bindValue(":speed", $data["speed"]);
@@ -138,6 +212,7 @@ class DatabaseManager {
         $stmt->bindValue(":immobile", (int)$data["immobile"]);
         $stmt->bindValue(":auto_respawn", (int)$data["autoRespawn"]);
         $stmt->bindValue(":can_be_hit", (int)$data["canBeHit"]);
+        $stmt->bindValue(":command_enabled", (int)($data["commandEnabled"] ?? false));
         $stmt->bindValue(":commands", json_encode($data["commands"]));
         $stmt->bindValue(":drops", json_encode($data["drops"]));
         $stmt->bindValue(":armor_helmet", $data["armor"]["helmet"]);

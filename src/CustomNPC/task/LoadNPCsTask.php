@@ -28,7 +28,6 @@ class LoadNPCsTask extends Task {
                 continue;
             }
 
-            // Vérifier qu'aucune entité Human n'existe déjà à cette position
             $bb = new \pocketmine\math\AxisAlignedBB(
                 $pos["x"] - 1, $pos["y"] - 1, $pos["z"] - 1,
                 $pos["x"] + 1, $pos["y"] + 1, $pos["z"] + 1

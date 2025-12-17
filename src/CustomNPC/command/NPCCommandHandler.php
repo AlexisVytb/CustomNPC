@@ -55,7 +55,7 @@ class NPCCommandHandler {
     }
 
     private function handleWandCommand(Player $player): bool {
-        $wand = VanillaItems::WOODEN_HOE()->setCustomName(Constants::NPC_WAND_NAME);
+        $wand = VanillaItems::STICK()->setCustomName(Constants::NPC_WAND_NAME);
         $player->getInventory()->addItem($wand);
         $player->sendMessage("§aTu as reçu la NPC Wand !");
         return true;
@@ -119,15 +119,59 @@ class NPCCommandHandler {
     }
 
     private function handleSkinCommand(Player $player, array $args): bool {
-        $player->sendMessage("§c⚠ Les skins custom ne fonctionnent pas sur Bedrock Edition !");
-        $player->sendMessage("§7Cette commande a été désactivée.");
-        $player->sendMessage("§7Utilise l'armure pour personnaliser l'apparence des NPCs.");
+        if(count($args) < 2) {
+            $player->sendMessage("§cUsage: /npcskin <uuid> <skin>");
+            $player->sendMessage("§7Exemples:");
+            $player->sendMessage("§7- /npcskin npc_123 player:Notch");
+            $player->sendMessage("§7- /npcskin npc_123 steve");
+            return true;
+        }
+        
+        $uuid = $args[0];
+        $skinPath = $args[1];
+        
+        if($this->npcManager->getNPCData($uuid) === null) {
+            $player->sendMessage("§cNPC introuvable !");
+            return true;
+        }
+        
+        $success = $this->npcManager->changeSkin($uuid, $skinPath);
+        
+        if($success) {
+            $player->sendMessage("§aSkin changé avec succès !");
+        } else {
+            $player->sendMessage("§cErreur lors du changement de skin !");
+        }
+        
         return true;
     }
 
     private function handleListSkinsCommand(Player $player): bool {
-        $player->sendMessage("§c⚠ Les skins custom ne fonctionnent pas sur Bedrock Edition !");
-        $player->sendMessage("§7Cette commande a été désactivée.");
+        $skinManager = $this->npcManager->getSkinManager();
+        $skinsFolder = \CustomNPC\Main::getInstance()->getDataFolder() . "skins/";
+        
+        $player->sendMessage("§e=== Skins disponibles ===");
+        $player->sendMessage("§7Format: §b/npcskin <uuid> <skin>");
+        $player->sendMessage("");
+        $player->sendMessage("§aTypes de skins:");
+        $player->sendMessage("§7- §eplayer:<pseudo> §7(skin d'un joueur)");
+        $player->sendMessage("§7- §esteve §7(skin par défaut)");
+        $player->sendMessage("§7- §ealex §7(skin Alex)");
+        
+        if(is_dir($skinsFolder)) {
+            $skins = array_diff(scandir($skinsFolder), ['.', '..']);
+            $pngSkins = array_filter($skins, fn($file) => str_ends_with($file, '.png'));
+            
+            if(!empty($pngSkins)) {
+                $player->sendMessage("");
+                $player->sendMessage("§eSkins personnalisés:");
+                foreach($pngSkins as $skin) {
+                    $skinName = str_replace('.png', '', $skin);
+                    $player->sendMessage("§7- §b$skinName");
+                }
+            }
+        }
+        
         return true;
     }
 
@@ -135,23 +179,14 @@ class NPCCommandHandler {
         $logger = \CustomNPC\Main::getInstance()->getLogger();
         $logger->info("=== DEBUG NPCs ===");
         
-        $debug = $this->npcManager->debugMappings();
-        
-        $logger->info("=== MAPPINGS (entityId → uuid) ===");
-        foreach($debug["mappings"] as $entityId => $uuid) {
-            $logger->info("  $entityId → $uuid");
-        }
-        
-        $logger->info("=== NPCs DATA ===");
-        foreach($debug["npcs"] as $uuid => $npcData) {
-            $logger->info("  $uuid: runtimeId={$npcData['runtimeId']}, canBeHit=" . ($npcData['canBeHit'] ? 'TRUE' : 'FALSE') . ", title={$npcData['title']}");
-        }
-        
         foreach($this->npcManager->getAllNPCData() as $uuid => $data) {
             $entityId = $data["runtimeId"] ?? 0;
             $world = \CustomNPC\Main::getInstance()->getServer()->getWorldManager()->getWorldByName($data["position"]["world"]);
             $exists = false;
             $actualHealth = "N/A";
+            $canBeHit = $data["canBeHit"] ?? true;
+            $commandEnabled = $data["commandEnabled"] ?? false;
+            $commandCount = count($data["commands"] ?? []);
             
             if($world !== null) {
                 $entity = $world->getEntity($entityId);
@@ -162,11 +197,14 @@ class NPCCommandHandler {
             }
             
             $logger->info(
-                "NPC '$uuid': " .
+                "NPC '$uuid' ({$data['title']}): " .
                 "EntityID=$entityId, " .
                 "Exists=" . ($exists ? "OUI" : "NON") . ", " .
                 "Health={$data['health']}/{$data['maxHealth']}, " .
-                "ActualHealth=$actualHealth"
+                "ActualHealth=$actualHealth, " .
+                "CanBeHit=" . ($canBeHit ? "OUI" : "NON") . ", " .
+                "CommandEnabled=" . ($commandEnabled ? "OUI" : "NON") . ", " .
+                "Commands=$commandCount"
             );
         }
         
@@ -186,6 +224,36 @@ class NPCCommandHandler {
         }
         
         $player->sendMessage("§a$count NPCs rafraîchis dans ce monde !");
+        return true;
+    }
+
+    private function handleRotateCommand(Player $player, array $args): bool {
+        if(empty($args)) {
+            $player->sendMessage("§cUsage: /npcrotate <uuid>");
+            return true;
+        }
+        
+        $uuid = $args[0];
+        $npcData = $this->npcManager->getNPCData($uuid);
+        
+        if($npcData === null) {
+            $player->sendMessage("§cNPC introuvable !");
+            return true;
+        }
+        
+        $location = $player->getLocation();
+        
+        $this->npcManager->updateNPCData($uuid, [
+            "yaw" => $location->getYaw(),
+            "pitch" => $location->getPitch()
+        ]);
+        
+        $this->npcManager->saveNPC($uuid);
+        
+        $world = $player->getWorld();
+        $this->npcManager->updateNPC($world, $uuid);
+        
+        $player->sendMessage("§aNPC tourné dans ta direction !");
         return true;
     }
 }
