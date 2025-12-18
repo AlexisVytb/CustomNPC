@@ -1,5 +1,5 @@
 name: CustomNPC
-version: 2.2.0
+version: 2.1.0-dev
 main: CustomNPC\Main
 api: 5.0.0
 author: AlexisV

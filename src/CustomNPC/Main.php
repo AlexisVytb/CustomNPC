@@ -22,8 +22,10 @@ class Main extends PluginBase {
 
     public function onEnable(): void {
         self::$instance = $this;
-        
+
         @mkdir($this->getDataFolder() . "skins/", 0777, true);
+
+        $this->saveDefaultConfig();
 
         $this->databaseManager = new DatabaseManager($this);
         $this->npcManager = new NPCManager($this, $this->databaseManager);
@@ -34,6 +36,7 @@ class Main extends PluginBase {
             new NPCEventListener($this->npcManager), 
             $this
         );
+        
         $this->getServer()->getPluginManager()->registerEvents(
             new NPCTapListener($this->npcManager),
             $this
@@ -70,9 +73,15 @@ class Main extends PluginBase {
 
         $this->getScheduler()->scheduleRepeatingTask(new NPCBehaviorTask($this->npcManager), 5);
         $this->getScheduler()->scheduleRepeatingTask(new NPCRegenTask($this->npcManager), 20);
-        $this->getScheduler()->scheduleRepeatingTask(new AutoSaveTask($this->npcManager), 1200);
 
-        $this->getLogger()->info("§aCustomNPC activé avec système de commandes !");
+        $autoSaveInterval = $this->getConfig()->get("settings")["auto-save-interval"] ?? 60;
+        $this->getScheduler()->scheduleRepeatingTask(
+            new AutoSaveTask($this->npcManager), 
+            $autoSaveInterval * 20
+        );
+
+        $dbType = strtoupper($this->databaseManager->getDatabaseType());
+        $this->getLogger()->info("§aCustomNPC activé avec {$dbType} et système de commandes !");
     }
 
     public function onDisable(): void {

@@ -1,0 +1,20 @@
+# Configuration CustomNPC
+
+# Type de base de données: "sqlite" ou "mysql"
+database:
+  type: "sqlite"
+
+  mysql:
+    host: "localhost"
+    port: 3306
+    username: "root"
+    password: ""
+    database: "customnpc"
+
+  sqlite:
+    file: "npcs.db"
+
+settings:
+  auto-save-interval: 60
+  
+  wand-detection-radius: 5.0
