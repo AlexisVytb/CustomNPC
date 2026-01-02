@@ -11,6 +11,10 @@ use pocketmine\event\entity\EntityDeathEvent;
 use pocketmine\player\Player;
 use pocketmine\entity\Living;
 use pocketmine\entity\effect\EffectInstance;
+use pocketmine\entity\location;
+use pocketmine\world\World;
+use pocketmine\event\world\ChunkLoadEvent;
+use pocketmine\event\world\ChunkUnloadEvent;
 use pocketmine\entity\effect\StringToEffectParser;
 use pocketmine\item\VanillaItems;
 use pocketmine\scheduler\Task;
@@ -29,84 +33,56 @@ class NPCEventListener implements Listener {
         $this->npcManager = $npcManager;
     }
 
-    public function onPlayerJoin(PlayerJoinEvent $event): void {
-        $player = $event->getPlayer();
+    public function onChunkLoad(ChunkLoadEvent $event): void {
+        $world = $event->getWorld();
+        $chunkX = $event->getChunkX();
+        $chunkZ = $event->getChunkZ();
         
-        Main::getInstance()->getScheduler()->scheduleDelayedTask(new class($this->npcManager, $player) extends Task {
-            private $npcManager;
-            private $player;
+        foreach($this->npcManager->getAllNPCData() as $uuid => $data) {
+            if($data["position"]["world"] !== $world->getFolderName()) continue;
             
-            public function __construct($npcManager, $player) {
-                $this->npcManager = $npcManager;
-                $this->player = $player;
-            }
+            $npcX = (int)($data["position"]["x"] ?? 0) >> 4;
+            $npcZ = (int)($data["position"]["z"] ?? 0) >> 4;
             
-            public function onRun(): void {
-                if(!$this->player->isOnline()) return;
-                
-                $world = $this->player->getWorld();
-                
-                foreach($this->npcManager->getAllNPCData() as $uuid => $data) {
-                    if($data["position"]["world"] !== $world->getFolderName()) continue;
+            if($npcX === $chunkX && $npcZ === $chunkZ) {
+                // Determine if we need to respawn via schedule to avoid immediate load issues
+                Main::getInstance()->getScheduler()->scheduleDelayedTask(new class($this->npcManager, $world, $uuid) extends Task {
+                    private $manager;
+                    private $world;
+                    private $uuid;
 
-                    $pos = $data["position"];
-                    $bb = new \pocketmine\math\AxisAlignedBB(
-                        $pos["x"] - 0.5, $pos["y"] - 0.5, $pos["z"] - 0.5,
-                        $pos["x"] + 0.5, $pos["y"] + 0.5, $pos["z"] + 0.5
-                    );
-                    $nearbyEntities = $world->getNearbyEntities($bb);
-                    $humanCount = 0;
-                    
-                    foreach($nearbyEntities as $entity) {
-                        if($entity instanceof \pocketmine\entity\Human) {
-                            $humanCount++;
-                            if($humanCount > 1 || $entity->getId() !== ($data["runtimeId"] ?? 0)) {
-                                $entity->flagForDespawn();
-                            }
-                        }
+                    public function __construct($manager, $world, $uuid) {
+                        $this->manager = $manager;
+                        $this->world = $world;
+                        $this->uuid = $uuid;
                     }
-                    $entityId = $data["runtimeId"] ?? 0;
-                    $entity = null;
-                    
-                    if($entityId > 0) {
-                        $entity = $world->getEntity($entityId);
+
+                    public function onRun(): void {
+                        $this->manager->spawnNPC($this->world, $this->uuid);
                     }
-                    
-                    if($entity !== null && !$entity->isClosed()) {
-                        $this->npcManager->repairMapping($entityId, $uuid);
-                    } else {
-                        $this->npcManager->spawnNPC($world, $uuid);
-                    }
-                }
+                }, 1);
             }
-        }, 20);
-        Main::getInstance()->getScheduler()->scheduleDelayedTask(new class($this->npcManager, $player) extends Task {
-            private $npcManager;
-            private $player;
-            
-            public function __construct($npcManager, $player) {
-                $this->npcManager = $npcManager;
-                $this->player = $player;
-            }
-            
-            public function onRun(): void {
-                if(!$this->player->isOnline()) return;
-                
-                $world = $this->player->getWorld();
-                
-                foreach($this->npcManager->getAllNPCData() as $uuid => $data) {
-                    if($data["position"]["world"] !== $world->getFolderName()) continue;
-                    
-                    $entityId = $data["runtimeId"] ?? 0;
-                    $entity = $world->getEntity($entityId);
-                    
-                    if($entity !== null && $entity instanceof \pocketmine\entity\Human && !$entity->isClosed()) {
-                        $entity->sendData([$this->player]);
-                        $this->npcManager->updateNameTag($entity, $uuid);
-                    }
-                }
-            }
-        }, 40);
+        }
+    }
+
+    public function onChunkUnload(ChunkUnloadEvent $event): void {
+        $world = $event->getWorld();
+        $chunkX = $event->getChunkX();
+        $chunkZ = $event->getChunkZ();
+        
+        // Optional: Could despawn here, but since setCanSaveWithChunk is false, 
+        // they will just disappear naturally. We might want to remove runtime tracking though.
+        foreach($this->npcManager->getAllNPCData() as $uuid => $data) {
+             if($data["position"]["world"] !== $world->getFolderName()) continue;
+             
+             $npcX = (int)($data["position"]["x"] ?? 0) >> 4;
+             $npcZ = (int)($data["position"]["z"] ?? 0) >> 4;
+             
+             if($npcX === $chunkX && $npcZ === $chunkZ) {
+                 // Clean up runtime ID mapping to prevent stale references
+                 // Note: spawnNPC handles cleanup of old IDs, so this is just optimization
+             }
+        }
     }
 
     public function onPlayerInteract(PlayerInteractEvent $event): void {
@@ -285,6 +261,14 @@ class NPCEventListener implements Listener {
             
             if($item->getCustomName() === Constants::NPC_WAND_NAME) {
                 (new MainGUI($this->npcManager))->open($damager, $npcUuid);
+                $event->cancel();
+                return;
+            }
+
+            // Handle UUID click check
+            if($this->npcManager->isWaitingForUuid($damager->getName())) {
+                $damager->sendMessage("§eUUID du NPC: §a" . $npcUuid);
+                $this->npcManager->setWaitingForUuid($damager->getName(), false);
                 $event->cancel();
                 return;
             }

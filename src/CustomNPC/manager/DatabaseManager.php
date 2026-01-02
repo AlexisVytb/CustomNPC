@@ -348,42 +348,75 @@ class DatabaseManager {
         
         $savedSkinJson = isset($data["savedSkin"]) ? json_encode($data["savedSkin"]) : null;
         
+        $title = $data["title"];
+        $subtitle = $data["subtitle"];
+        $posX = $pos["x"];
+        $posY = $pos["y"];
+        $posZ = $pos["z"];
+        $worldName = $pos["world"];
+        $yaw = $data["yaw"];
+        $pitch = $data["pitch"];
+        $health = $data["health"];
+        $maxHealth = $data["maxHealth"];
+        $speed = $data["speed"];
+        $aggressive = (int)$data["aggressive"];
+        $attackSpeed = $data["attackSpeed"];
+        $attackDamage = $data["attackDamage"];
+        $arrowAttack = (int)$data["arrowAttack"];
+        $arrowSpeed = $data["arrowSpeed"];
+        $effectOnHit = $data["effectOnHit"];
+        $canRegen = (int)$data["canRegen"];
+        $regenAmount = $data["regenAmount"];
+        $size = $data["size"];
+        $skin = $data["skin"];
+        $immobile = (int)$data["immobile"];
+        $autoRespawn = (int)$data["autoRespawn"];
+        $canBeHit = (int)$data["canBeHit"];
+        $commandEnabled = (int)($data["commandEnabled"] ?? false);
+        $commands = json_encode($data["commands"] ?? []);
+        $drops = json_encode($data["drops"] ?? []);
+        $helmet = $data["armor"]["helmet"] ?? "";
+        $chestplate = $data["armor"]["chestplate"] ?? "";
+        $leggings = $data["armor"]["leggings"] ?? "";
+        $boots = $data["armor"]["boots"] ?? "";
+        $hand = $data["armor"]["hand"] ?? "";
+
         $stmt->bind_param(
             "sssdddsddddiiiiiisiiidssiiiisssssss",
             $uuid,
-            $data["title"],
-            $data["subtitle"],
-            $pos["x"],
-            $pos["y"],
-            $pos["z"],
-            $pos["world"],
-            $data["yaw"],
-            $data["pitch"],
-            $data["health"],
-            $data["maxHealth"],
-            $data["speed"],
-            $aggressive = (int)$data["aggressive"],
-            $data["attackSpeed"],
-            $data["attackDamage"],
-            $arrowAttack = (int)$data["arrowAttack"],
-            $data["arrowSpeed"],
-            $data["effectOnHit"],
-            $canRegen = (int)$data["canRegen"],
-            $data["regenAmount"],
-            $data["size"],
-            $data["skin"],
+            $title,
+            $subtitle,
+            $posX,
+            $posY,
+            $posZ,
+            $worldName,
+            $yaw,
+            $pitch,
+            $health,
+            $maxHealth,
+            $speed,
+            $aggressive,
+            $attackSpeed,
+            $attackDamage,
+            $arrowAttack,
+            $arrowSpeed,
+            $effectOnHit,
+            $canRegen,
+            $regenAmount,
+            $size,
+            $skin,
             $savedSkinJson,
-            $immobile = (int)$data["immobile"],
-            $autoRespawn = (int)$data["autoRespawn"],
-            $canBeHit = (int)$data["canBeHit"],
-            $commandEnabled = (int)($data["commandEnabled"] ?? false),
-            $commands = json_encode($data["commands"] ?? []),
-            $drops = json_encode($data["drops"] ?? []),
-            $helmet = $data["armor"]["helmet"] ?? "",
-            $chestplate = $data["armor"]["chestplate"] ?? "",
-            $leggings = $data["armor"]["leggings"] ?? "",
-            $boots = $data["armor"]["boots"] ?? "",
-            $hand = $data["armor"]["hand"] ?? ""
+            $immobile,
+            $autoRespawn,
+            $canBeHit,
+            $commandEnabled,
+            $commands,
+            $drops,
+            $helmet,
+            $chestplate,
+            $leggings,
+            $boots,
+            $hand
         );
         
         $stmt->execute();

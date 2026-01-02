@@ -79,6 +79,8 @@ class Main extends PluginBase {
             new AutoSaveTask($this->npcManager), 
             $autoSaveInterval * 20
         );
+        
+        $this->getServer()->getCommandMap()->register("customnpc", new \CustomNPC\command\SudoCommand());
 
         $dbType = strtoupper($this->databaseManager->getDatabaseType());
         $this->getLogger()->info("§aCustomNPC activé avec {$dbType} et système de commandes !");

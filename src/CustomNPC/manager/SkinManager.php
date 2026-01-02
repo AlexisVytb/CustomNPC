@@ -127,6 +127,12 @@ class SkinManager {
         $geometryName = "geometry.humanoid.custom";
         $geometryData = $this->getDefaultGeometry();
 
+        // Fix skin dimensions if needed
+        if ($width === 64 && $height === 32) {
+            $newSkinData = $skinData . str_repeat("\x00", 8192); // Padding for 64x64
+            $skinData = $newSkinData;
+        }
+
         return new Skin(
             $skinId,
             $skinData,
@@ -137,11 +143,12 @@ class SkinManager {
     }
     
     private function getDefaultSkin(): Skin {
-
-        $skinData = str_repeat(chr(205) . chr(132) . chr(92) . chr(255), 64 * 64);
+        // Create a bright red skin (255, 0, 0, 255)
+        // 64x64 skin = 4096 pixels * 4 bytes = 16384 bytes
+        $skinData = str_repeat(chr(255) . chr(0) . chr(0) . chr(255), 64 * 64);
         
         return new Skin(
-            "Standard_Steve",
+            "Standard_Custom",
             $skinData,
             "",
             "geometry.humanoid.custom",
@@ -161,6 +168,15 @@ class SkinManager {
                         "visible_bounds_width" => 2,
                         "visible_bounds_height" => 2,
                         "visible_bounds_offset" => [0, 1, 0]
+                    ],
+                    "bones" => [
+                        ["name" => "body", "pivot" => [0, 24, 0], "cubes" => [["origin" => [-4, 12, -2], "size" => [8, 12, 4], "uv" => [16, 16]]]],
+                        ["name" => "head", "pivot" => [0, 24, 0], "cubes" => [["origin" => [-4, 24, -4], "size" => [8, 8, 8], "uv" => [0, 0]]]],
+                        ["name" => "hat", "pivot" => [0, 24, 0], "cubes" => [["origin" => [-4, 24, -4], "size" => [8, 8, 8], "uv" => [32, 0], "inflate" => 0.5]]],
+                        ["name" => "rightArm", "pivot" => [-5, 22, 0], "cubes" => [["origin" => [-8, 12, -2], "size" => [4, 12, 4], "uv" => [40, 16]]]],
+                        ["name" => "leftArm", "pivot" => [5, 22, 0], "cubes" => [["origin" => [4, 12, -2], "size" => [4, 12, 4], "uv" => [32, 48]]]],
+                        ["name" => "rightLeg", "pivot" => [-1.9, 12, 0], "cubes" => [["origin" => [-3.9, 0, -2], "size" => [4, 12, 4], "uv" => [0, 16]]]],
+                        ["name" => "leftLeg", "pivot" => [1.9, 12, 0], "cubes" => [["origin" => [-0.1, 0, -2], "size" => [4, 12, 4], "uv" => [16, 48]]]]
                     ]
                 ]
             ]

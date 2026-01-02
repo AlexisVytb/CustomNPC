@@ -23,7 +23,7 @@ class NPCCommandHandler {
                 return $this->handleWandCommand($player);
             
             case "npcspawn":
-                return $this->handleSpawnCommand($player);
+                return $this->handleSpawnCommand($player, $args);
             
             case "npcdelete":
                 return $this->handleDeleteCommand($player, $args);
@@ -48,6 +48,13 @@ class NPCCommandHandler {
             
             case "npcrotate":
                 return $this->handleRotateCommand($player, $args);
+
+
+            case "npcuuid":
+                return $this->handleUuidCommand($player);
+
+            case "npcfakeplayer":
+                return $this->handleFakePlayerCommand($player, $args);
             
             default:
                 return false;
@@ -55,13 +62,45 @@ class NPCCommandHandler {
     }
 
     private function handleWandCommand(Player $player): bool {
-        $wand = VanillaItems::STICK()->setCustomName(Constants::NPC_WAND_NAME);
+        $wand = VanillaItems::WOODEN_HOE()->setCustomName(Constants::NPC_WAND_NAME);
         $player->getInventory()->addItem($wand);
         $player->sendMessage("§aTu as reçu la NPC Wand !");
         return true;
     }
 
-    private function handleSpawnCommand(Player $player): bool {
+    private function handleSpawnCommand(Player $player, ?array $args = null): bool {
+        // If an argument is provided, try to respawn/fix a specific NPC
+        if(isset($args[0]) && $args[0] !== "") {
+             $uuid = $args[0];
+             $data = $this->npcManager->getNPCData($uuid);
+             
+             if($data === null) {
+                 $player->sendMessage("§cNPC introuvable avec cet UUID !");
+                 return true;
+             }
+             
+             // Update position to player's position
+             $pos = $player->getPosition();
+             $location = $player->getLocation();
+             
+             $this->npcManager->updateNPCData($uuid, [
+                "position" => [
+                    "x" => $pos->getX(),
+                    "y" => $pos->getY(),
+                    "z" => $pos->getZ(),
+                    "world" => $player->getWorld()->getFolderName()
+                ],
+                "yaw" => $location->getYaw(),
+                "pitch" => $location->getPitch()
+             ]);
+             
+             $this->npcManager->saveNPC($uuid);
+             $this->npcManager->respawnNPC($uuid);
+             
+             $player->sendMessage("§aNPC {$uuid} respawn (déplacé sur toi) !");
+              return true;
+        }
+
         $pos = $player->getPosition();
         $location = $player->getLocation();
         
@@ -78,6 +117,17 @@ class NPCCommandHandler {
         $this->npcManager->spawnNPC($player->getWorld(), $uuid);
         
         $player->sendMessage("§aNPC créé avec ton orientation ! UUID: §e$uuid");
+        return true;
+    }
+
+    private function handleUuidCommand(Player $player): bool {
+        if($this->npcManager->isWaitingForUuid($player->getName())) {
+            $this->npcManager->setWaitingForUuid($player->getName(), false);
+            $player->sendMessage("§cMode détection d'UUID désactivé.");
+        } else {
+            $this->npcManager->setWaitingForUuid($player->getName(), true);
+            $player->sendMessage("§aMode détection activé ! Tape un NPC pour voir son UUID.");
+        }
         return true;
     }
 
@@ -254,6 +304,21 @@ class NPCCommandHandler {
         $this->npcManager->updateNPC($world, $uuid);
         
         $player->sendMessage("§aNPC tourné dans ta direction !");
+        return true;
+    }
+    private function handleFakePlayerCommand(Player $player, array $args): bool {
+        if(empty($args)) {
+            $player->sendMessage("§cUsage: /npcfakeplayer <uuid>");
+            return true;
+        }
+
+        $uuid = $args[0];
+        if($this->npcManager->getNPCData($uuid) === null) {
+            $player->sendMessage("§cNPC introuvable !");
+            return true;
+        }
+
+        (new \CustomNPC\gui\FakePlayerGUI($this->npcManager))->open($player, $uuid);
         return true;
     }
 }

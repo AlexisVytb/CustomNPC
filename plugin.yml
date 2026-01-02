@@ -23,6 +23,13 @@ commands:
   npclist:
     description: Lister tous les NPCs
     permission: customnpc.list
+  npcuuid:
+    description: Obtenir l'UUID d'un NPC au clic
+    permission: customnpc.uuid
+  npcfakeplayer:
+    description: Configurer un NPC comme Fake Player
+    usage: /npcfakeplayer <uuid>
+    permission: customnpc.fakeplayer
 
 
 permissions:
@@ -41,3 +48,13 @@ permissions:
   customnpc.list:
     description: Permet de voir la list des ncps
     default: op
+  customnpc.uuid:
+    description: Permet d'obtenir l'UUID d'un NPC
+    default: op
+  customnpc.fakeplayer:
+    description: Permet de configurer un fake player
+    default: op
+  customnpc.sudo:
+    description: Permet s'utiliser le /sudo
+    default: op
+

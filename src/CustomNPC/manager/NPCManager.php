@@ -21,6 +21,7 @@ class NPCManager {
     private array $npcUuidByEntityId = [];
     private array $npcTargets = [];
     private array $npcLastAttack = [];
+    private array $waitingForUuid = []; // Players waiting for UUID click
 
     public function __construct(Main $plugin, DatabaseManager $database) {
         $this->plugin = $plugin;
@@ -139,6 +140,9 @@ class NPCManager {
         }
         $entity = new Human($location, $skin, $nbt);
 
+        // IMPORTANT: Prevent saving with chunk to avoid generic entity bug
+        $entity->setCanSaveWithChunk(false);
+
         $maxHealth = (float)($data["maxHealth"] ?? 100.0);
         $currentHealth = (float)($data["health"] ?? $maxHealth);
         
@@ -151,6 +155,7 @@ class NPCManager {
         
         if($data["immobile"] ?? false) {
             $entity->setHasGravity(false);
+            $entity->setNoClientPredictions(true);
         }
         
         $this->equipArmor($entity, $data["armor"] ?? []);
@@ -161,10 +166,11 @@ class NPCManager {
 
         $entityId = $entity->getId();
         $this->npcData[$uuid]["runtimeId"] = $entityId;
+        // Fix: Ensure mapping is rigorous
         $this->npcUuidByEntityId[$entityId] = $uuid;
         
+        // Immediate update to ensure name tag is correct
         $this->updateNameTag($entity, $uuid);
-        $this->scheduleRefresh($entity, $uuid, $data, $maxHealth, $currentHealth);
     }
 
     private function refreshSkin(Human $entity, \pocketmine\entity\Skin $skin): void {
@@ -253,6 +259,7 @@ class NPCManager {
                         
                         if($this->data["immobile"] ?? false) {
                             $this->entity->setHasGravity(false);
+                            $this->entity->setNoClientPredictions(true);
                         }
                         
                         $armorInv = $this->entity->getArmorInventory();
@@ -434,6 +441,18 @@ class NPCManager {
             return true;
         }
         return false;
+    }
+
+    public function setWaitingForUuid(string $playerName, bool $waiting): void {
+        if($waiting) {
+            $this->waitingForUuid[$playerName] = true;
+        } else {
+            unset($this->waitingForUuid[$playerName]);
+        }
+    }
+
+    public function isWaitingForUuid(string $playerName): bool {
+        return isset($this->waitingForUuid[$playerName]);
     }
 
     public function getDefaultNPCData(float $x, float $y, float $z, string $worldName): array {
