@@ -21,7 +21,7 @@ class NPCManager {
     private array $npcUuidByEntityId = [];
     private array $npcTargets = [];
     private array $npcLastAttack = [];
-    private array $waitingForUuid = []; // Players waiting for UUID click
+    private array $waitingForUuid = [];
 
     public function __construct(Main $plugin, DatabaseManager $database) {
         $this->plugin = $plugin;
@@ -140,7 +140,6 @@ class NPCManager {
         }
         $entity = new Human($location, $skin, $nbt);
 
-        // IMPORTANT: Prevent saving with chunk to avoid generic entity bug
         $entity->setCanSaveWithChunk(false);
 
         $maxHealth = (float)($data["maxHealth"] ?? 100.0);
@@ -166,10 +165,8 @@ class NPCManager {
 
         $entityId = $entity->getId();
         $this->npcData[$uuid]["runtimeId"] = $entityId;
-        // Fix: Ensure mapping is rigorous
         $this->npcUuidByEntityId[$entityId] = $uuid;
-        
-        // Immediate update to ensure name tag is correct
+
         $this->updateNameTag($entity, $uuid);
     }
 

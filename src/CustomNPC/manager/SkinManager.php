@@ -127,7 +127,6 @@ class SkinManager {
         $geometryName = "geometry.humanoid.custom";
         $geometryData = $this->getDefaultGeometry();
 
-        // Fix skin dimensions if needed
         if ($width === 64 && $height === 32) {
             $newSkinData = $skinData . str_repeat("\x00", 8192); // Padding for 64x64
             $skinData = $newSkinData;
@@ -143,8 +142,6 @@ class SkinManager {
     }
     
     private function getDefaultSkin(): Skin {
-        // Create a bright red skin (255, 0, 0, 255)
-        // 64x64 skin = 4096 pixels * 4 bytes = 16384 bytes
         $skinData = str_repeat(chr(255) . chr(0) . chr(0) . chr(255), 64 * 64);
         
         return new Skin(

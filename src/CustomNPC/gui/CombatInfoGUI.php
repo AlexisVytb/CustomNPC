@@ -55,9 +55,9 @@ class CombatInfoGUI {
         $form->setTitle("§cInfo Combat");
         $form->addInput("Vitesse d'attaque", "1-3", (string)($data["attackSpeed"] ?? 1));
         $form->addInput("Dégâts", "1-999", (string)($data["attackDamage"] ?? 1));
-        $form->addToggle("Attaque par flèche §4(NON FONCTIONNEL)", $data["arrowAttack"] ?? false);
-        $form->addInput("Vitesse des flèches §4(NON FONCTIONNEL)", "1-10", (string)($data["arrowSpeed"] ?? 1));
-        $form->addInput("Effet si touché (ex: poison:100:1) §4(NON FONCTIONNEL)", "", $data["effectOnHit"] ?? "");
+        $form->addToggle("Attaque par flèche", $data["arrowAttack"] ?? false);
+        $form->addInput("Vitesse des flèches", "1-10", (string)($data["arrowSpeed"] ?? 1));
+        $form->addInput("Effet si touché (ex: poison:5:1 = 5 secondes)", "", $data["effectOnHit"] ?? "");
 
         $player->sendForm($form);
     }

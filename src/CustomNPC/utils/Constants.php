@@ -4,8 +4,8 @@ namespace CustomNPC\utils;
 
 class Constants {
     
-    public const NPC_WAND_NAME = "§6NPC Wand";
-    public const NPC_ITEM_PREFIX = "§6NPC Item: ";
+    public const NPC_WAND_NAME = "§r§6NPC Wand";
+    public const NPC_ITEM_PREFIX = "§r§2NPC Item: ";
     
     public const MIN_HEALTH = 1.0;
     public const MAX_HEALTH = 200000.0;

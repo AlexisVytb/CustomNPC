@@ -11,6 +11,7 @@ use pocketmine\event\entity\EntityDeathEvent;
 use pocketmine\player\Player;
 use pocketmine\entity\Living;
 use pocketmine\entity\effect\EffectInstance;
+use pocketmine\entity\projectile\Projectile;
 use pocketmine\entity\location;
 use pocketmine\world\World;
 use pocketmine\event\world\ChunkLoadEvent;
@@ -45,7 +46,6 @@ class NPCEventListener implements Listener {
             $npcZ = (int)($data["position"]["z"] ?? 0) >> 4;
             
             if($npcX === $chunkX && $npcZ === $chunkZ) {
-                // Determine if we need to respawn via schedule to avoid immediate load issues
                 Main::getInstance()->getScheduler()->scheduleDelayedTask(new class($this->npcManager, $world, $uuid) extends Task {
                     private $manager;
                     private $world;
@@ -70,8 +70,6 @@ class NPCEventListener implements Listener {
         $chunkX = $event->getChunkX();
         $chunkZ = $event->getChunkZ();
         
-        // Optional: Could despawn here, but since setCanSaveWithChunk is false, 
-        // they will just disappear naturally. We might want to remove runtime tracking though.
         foreach($this->npcManager->getAllNPCData() as $uuid => $data) {
              if($data["position"]["world"] !== $world->getFolderName()) continue;
              
@@ -79,8 +77,6 @@ class NPCEventListener implements Listener {
              $npcZ = (int)($data["position"]["z"] ?? 0) >> 4;
              
              if($npcX === $chunkX && $npcZ === $chunkZ) {
-                 // Clean up runtime ID mapping to prevent stale references
-                 // Note: spawnNPC handles cleanup of old IDs, so this is just optimization
              }
         }
     }
@@ -161,6 +157,38 @@ class NPCEventListener implements Listener {
     public function onEntityDamage(EntityDamageEvent $event): void {
         $entity = $event->getEntity();
         $entityId = $entity->getId();
+
+        if($entity instanceof Player && $event instanceof EntityDamageByEntityEvent) {
+            $damager = $event->getDamager();
+            
+            if($damager instanceof Projectile) {
+                $owner = $damager->getOwningEntity();
+                if($owner instanceof Human) {
+                    $attackerUuid = $this->npcManager->findNPCByEntityId($owner->getId());
+                    if($attackerUuid !== null) {
+                        $attackerData = $this->npcManager->getNPCData($attackerUuid);
+                        if($attackerData !== null) {
+                            $effectId = $attackerData["effectOnHit"] ?? "";
+                            if($effectId !== "") {
+                                $this->applyEffect($entity, $effectId);
+                            }
+                        }
+                    }
+                }
+            }
+            elseif($damager instanceof Human) {
+                $attackerUuid = $this->npcManager->findNPCByEntityId($damager->getId());
+                if($attackerUuid !== null) {
+                    $attackerData = $this->npcManager->getNPCData($attackerUuid);
+                    if($attackerData !== null) {
+                        $effectId = $attackerData["effectOnHit"] ?? "";
+                        if($effectId !== "") {
+                            $this->applyEffect($entity, $effectId);
+                        }
+                    }
+                }
+            }
+        }
 
         $npcUuid = $this->npcManager->findNPCByEntityId($entityId);
 
@@ -264,8 +292,6 @@ class NPCEventListener implements Listener {
                 $event->cancel();
                 return;
             }
-
-            // Handle UUID click check
             if($this->npcManager->isWaitingForUuid($damager->getName())) {
                 $damager->sendMessage("§eUUID du NPC: §a" . $npcUuid);
                 $this->npcManager->setWaitingForUuid($damager->getName(), false);
@@ -286,14 +312,43 @@ class NPCEventListener implements Listener {
 
         $victim = $event->getEntity();
 
+        if($damager instanceof Projectile) {
+            $owner = $damager->getOwningEntity();
+            if($owner instanceof Human) {
+                $ownerUuid = $this->npcManager->findNPCByEntityId($owner->getId());
+                if($ownerUuid !== null) {
+                    $ownerData = $this->npcManager->getNPCData($ownerUuid);
+                    if($ownerData !== null && isset($ownerData["effectOnHit"])) {
+                         $effectOnHit = $ownerData["effectOnHit"];
+                         if($victim instanceof Player && $effectOnHit !== "") {
+                             $this->applyEffect($victim, $effectOnHit);
+                         }
+                    }
+                }
+            }
+        }
+
         if($victim instanceof Player && !($damager instanceof Player)){
             if(isset($npcData["attackDamage"])){
                 $event->setBaseDamage((float) $npcData["attackDamage"]);
             }
 
-            $effectId = $npcData["effectOnHit"] ?? "";
-            if($effectId !== ""){
-                $this->applyEffect($victim, $effectId);
+            $realDamager = $damager;
+            if($damager instanceof Projectile) {
+                $realDamager = $damager->getOwningEntity();
+            }
+
+            if($realDamager instanceof Human) {
+                 $attackerUuid = $this->npcManager->findNPCByEntityId($realDamager->getId());
+                 if($attackerUuid !== null) {
+                      $attackerData = $this->npcManager->getNPCData($attackerUuid);
+                      if($attackerData !== null) {
+                           $effectId = $attackerData["effectOnHit"] ?? "";
+                           if($effectId !== "" && $victim instanceof Player){
+                               $this->applyEffect($victim, $effectId);
+                           }
+                      }
+                 }
             }
         }
     }
@@ -318,12 +373,14 @@ class NPCEventListener implements Listener {
     private function applyEffect(Player $player, string $effectId): void {
         $parts = explode(":", $effectId);
         $effectName = $parts[0];
-        $duration = isset($parts[1]) ? (int)$parts[1] : 100;
+        $durationSeconds = isset($parts[1]) ? (int)$parts[1] : 5; // Default 5 seconds
         $amplifier = isset($parts[2]) ? (int)$parts[2] : 0;
+        
+        $durationTicks = $durationSeconds * 20; // Convert seconds to ticks
 
         $effect = StringToEffectParser::getInstance()->parse($effectName);
         if($effect !== null) {
-            $player->getEffects()->add(new EffectInstance($effect, $duration, $amplifier));
+            $player->getEffects()->add(new EffectInstance($effect, $durationTicks, $amplifier));
         }
     }
 

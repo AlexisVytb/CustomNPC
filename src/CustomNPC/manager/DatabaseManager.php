@@ -80,18 +80,15 @@ class DatabaseManager {
             armor_boots TEXT,
             armor_hand TEXT
         )");
-        
-        // Migration: ajouter les colonnes si elles n'existent pas
+
         try {
             $this->database->exec("ALTER TABLE npcs ADD COLUMN command_enabled INTEGER DEFAULT 0");
         } catch(\Exception $e) {
-            // Colonne existe déjà
         }
         
         try {
             $this->database->exec("ALTER TABLE npcs ADD COLUMN saved_skin TEXT");
         } catch(\Exception $e) {
-            // Colonne existe déjà
         }
         
         $this->plugin->getLogger()->info("SQLite initialisé avec succès");
@@ -115,7 +112,6 @@ class DatabaseManager {
             
             $this->database->set_charset("utf8mb4");
             
-            // Créer la table
             $query = "CREATE TABLE IF NOT EXISTS npcs (
                 uuid VARCHAR(255) PRIMARY KEY,
                 title TEXT,
@@ -155,7 +151,6 @@ class DatabaseManager {
             
             $this->database->query($query);
             
-            // Migration: ajouter les colonnes si n'existent pas
             $this->database->query("ALTER TABLE npcs ADD COLUMN command_enabled TINYINT(1) DEFAULT 0");
             $this->database->query("ALTER TABLE npcs ADD COLUMN saved_skin TEXT");
             

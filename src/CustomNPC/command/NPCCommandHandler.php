@@ -69,7 +69,6 @@ class NPCCommandHandler {
     }
 
     private function handleSpawnCommand(Player $player, ?array $args = null): bool {
-        // If an argument is provided, try to respawn/fix a specific NPC
         if(isset($args[0]) && $args[0] !== "") {
              $uuid = $args[0];
              $data = $this->npcManager->getNPCData($uuid);
@@ -79,7 +78,6 @@ class NPCCommandHandler {
                  return true;
              }
              
-             // Update position to player's position
              $pos = $player->getPosition();
              $location = $player->getLocation();
              

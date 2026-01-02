@@ -10,8 +10,12 @@ Un plugin **Custom NPC** pour **PocketMine-MP 5** qui permet d’ajouter, gérer
 |-------------------|----------------------------------------------------------|-------------------|
 | `/npcwand`        | Donne une baguette spéciale pour ouvrir le GUI NPC.      | `customnpc.wand`  |
 | `/npcspawn`       | Permet de faire apparaître un nouveau PNJ.               | `customnpc.spawn` |
+| `/npcspawn <uuid>`       | Permet de faire respawn le NPC.               | `customnpc.spawn` |
 | `/npcrotate`      | Fait pivoter un PNJ existant.                            | `customnpc.rotate`|
 | `/npcarmor`       | Met une armure à votre NPC                               | `customnpc.armor` |
+| `/npcuuid`       | Donne l'uuid du npc frappé                             | `customnpc.uuid` |
+| `/npclist`       | Liste de tout les npcs                       | `customnpc.list` |
+| `/npcfakeplayer <uuid>`       | Ouvre un GUI de "Fake Player" pour le npc             | `customnpc.fakeplayer` |
 
 ---
 
@@ -19,9 +23,13 @@ Un plugin **Custom NPC** pour **PocketMine-MP 5** qui permet d’ajouter, gérer
 
 Lorsque vous utilisez la baguette (`/npcwand`), une **interface intuitive** s’ouvre avec plusieurs catégories :
 
-- 📝 **Info** – Informations générales sur le PNJ + Contrôle des npcs
-- ⚔️ **Combat** – Paramètres liés aux interactions de combat  
-- 📊 **Autre Info** – Détails supplémentaires et personnalisations  
+-  **Info** – Informations générales sur le PNJ + Contrôle des npcs
+- **Combat** – Paramètres liés aux interactions de combat  
+- **Autre Info** – Détails supplémentaires et personnalisations  
+- **Dupliquer** - Duplique le npc, new uuid et sur vous
+- **Supprimer** - Supprime le npc
+- **Prendre l'item** - Vous donne une émeraude avec toutes les caractéristique du npc
+- **Commande GUI** - Commande a éxécuté par le joueur / server si le joueur tape le npc
 
 ---
 
@@ -32,6 +40,7 @@ Lorsque vous utilisez la baguette (`/npcwand`), une **interface intuitive** s’
 - ⚙️ Personnalisation avancée des PNJ (informations, actions, etc.)  
 - 💬 Gestion simple via commandes en jeu  
 - 🔒 Permissions pour un meilleur contrôle staff
+- 🎁 Système de combat avancé, via flèches, ou attaque au corp-à-corp
 
 ---
 
@@ -69,4 +78,4 @@ Vous êtes libre de le modifier et de le redistribuer tant que la licence est co
 
 ---
 
-✨ _Développez des PNJ vivants et interactifs sur votre serveur Minecraft !_ 🧙
+✨ _Développez des PNJ vivants et interactifs sur votre serveur Minecraft Pocketmine !_ 🧙

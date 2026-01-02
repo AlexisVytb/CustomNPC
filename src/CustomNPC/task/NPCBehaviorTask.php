@@ -10,6 +10,8 @@ use pocketmine\event\entity\EntityDamageByEntityEvent;
 use pocketmine\event\entity\EntityDamageEvent;
 use CustomNPC\manager\NPCManager;
 use CustomNPC\utils\Constants;
+use pocketmine\entity\projectile\Arrow;
+use pocketmine\entity\projectile\Projectile;
 
 class NPCBehaviorTask extends Task {
 
@@ -74,10 +76,41 @@ class NPCBehaviorTask extends Task {
             $this->moveTowardsTarget($npc, $target, $data, $world);
         }
 
-        if($distance < Constants::NPC_ATTACK_RANGE && $this->npcManager->canAttack($uuid)) {
+        if($distance < Constants::NPC_ATTACK_RANGE && !($data["arrowAttack"] ?? false) && $this->npcManager->canAttack($uuid)) {
             $event = new EntityDamageByEntityEvent($npc, $target, EntityDamageEvent::CAUSE_ENTITY_ATTACK, $data["attackDamage"] ?? 1);
             $target->attack($event);
+
+            if(!$event->isCancelled() && isset($data["effectOnHit"]) && $data["effectOnHit"] !== "") {
+                $this->applyEffectToPlayer($target, $data["effectOnHit"]);
+            }
         }
+
+        if(($data["arrowAttack"] ?? false) && $this->npcManager->canAttack($uuid)) {
+             if($distance <= Constants::NPC_AGGRO_RADIUS) {
+                 $this->shootArrow($npc, $target, $data);
+             }
+        }
+    }
+
+    private function shootArrow(Living $npc, $target, array $data): void {
+        $sourcePos = $npc->getPosition()->add(0, $npc->getEyeHeight(), 0);
+        $targetPos = $target->getPosition()->add(0, $target->getEyeHeight(), 0);
+        
+        $direction = $targetPos->subtractVector($sourcePos)->normalize();
+        $speed = ($data["arrowSpeed"] ?? 1.0) * 0.8;
+        
+        $location = Location::fromObject($sourcePos, $npc->getWorld(), 
+            (atan2($direction->z, $direction->x) * 180 / M_PI) - 90,
+            -atan2($direction->y, sqrt($direction->x ** 2 + $direction->z ** 2)) * 180 / M_PI
+        );
+        
+        $arrow = new Arrow($location, $npc, ($data["critical"] ?? false));
+        $arrow->setMotion($direction->multiply($speed));
+
+        $arrow->setBaseDamage($data["attackDamage"] ?? 2.0);
+        
+        $arrow->spawnToAll();
+        $npc->getWorld()->addSound($sourcePos, new \pocketmine\world\sound\BowShootSound());
     }
 
     private function moveTowardsTarget(Living $npc, $target, array $data, $world): void {
@@ -129,6 +162,22 @@ class NPCBehaviorTask extends Task {
                 $newY -= 0.5;
             }
             $npc->teleport(new Location($newX, $newY, $newZ, $world, $yaw, 0));
+        }
+    }
+
+    private function applyEffectToPlayer($player, string $effectId): void {
+        if(!($player instanceof \pocketmine\player\Player)) return;
+        
+        $parts = explode(":", $effectId);
+        $effectName = $parts[0];
+        $durationSeconds = isset($parts[1]) ? (int)$parts[1] : 5;
+        $amplifier = isset($parts[2]) ? (int)$parts[2] : 0;
+        
+        $durationTicks = $durationSeconds * 20;
+
+        $effect = \pocketmine\entity\effect\StringToEffectParser::getInstance()->parse($effectName);
+        if($effect !== null) {
+            $player->getEffects()->add(new \pocketmine\entity\effect\EffectInstance($effect, $durationTicks, $amplifier));
         }
     }
 }
