@@ -1,4 +1,4 @@
-name: CustomNPC
+name: Custom-NPCs PMP 5.0.0
 version: 2.2.0-dev
 main: CustomNPC\Main
 api: 5.0.0
