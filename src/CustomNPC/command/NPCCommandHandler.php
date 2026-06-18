@@ -91,14 +91,12 @@ class NPCCommandHandler {
         $this->npcManager->setAdmin($player->getName(), !$isAdmin);
 
         if(!$isAdmin) {
-            // On active le mode admin
             $wand = \pocketmine\item\VanillaItems::WOODEN_HOE()->setCustomName(Constants::NPC_WAND_NAME);
             $player->getInventory()->addItem($wand);
             $player->sendMessage("§a§lMode NPC Admin activé !");
             $player->sendMessage("§eTu as reçu la NPC Wand.");
             $player->sendMessage("§7Clic gauche = Éditer | Clic droit = Créer un NPC");
         } else {
-            // On désactive le mode admin
             foreach($player->getInventory()->getContents() as $index => $item) {
                 if($item->getCustomName() === Constants::NPC_WAND_NAME) {
                     $player->getInventory()->setItem($index, \pocketmine\item\VanillaItems::AIR());
@@ -108,7 +106,6 @@ class NPCCommandHandler {
             $player->sendMessage("§eLa NPC Wand a été retirée de ton inventaire.");
         }
 
-        // Rafraîchir les nametags pour ce joueur
         $this->npcManager->refreshNPCsForPlayer($player);
         return true;
     }
