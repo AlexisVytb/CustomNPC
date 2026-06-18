@@ -8,20 +8,20 @@ Un plugin **Custom NPC** pour **PocketMine-MP 5** qui permet d’ajouter, gérer
 
 | Commande          | Description                                              | Permission        |
 |-------------------|----------------------------------------------------------|-------------------|
-| `/npcwand`        | Donne une baguette spéciale pour ouvrir le GUI NPC.      | `customnpc.wand`  |
-| `/npcspawn`       | Permet de faire apparaître un nouveau PNJ.               | `customnpc.spawn` |
-| `/npcspawn <uuid>`       | Permet de faire respawn le NPC.               | `customnpc.spawn` |
-| `/npcrotate`      | Fait pivoter un PNJ existant.                            | `customnpc.rotate`|
-| `/npcarmor`       | Met une armure à votre NPC                               | `customnpc.armor` |
-| `/npcuuid`       | Donne l'uuid du npc frappé                             | `customnpc.uuid` |
-| `/npclist`       | Liste de tout les npcs                       | `customnpc.list` |
-| `/npcfakeplayer <uuid>`       | Ouvre un GUI de "Fake Player" pour le npc             | `customnpc.fakeplayer` |
+| `/npc wand`        | Donne une baguette spéciale pour ouvrir le GUI NPC.      | `customnpc.wand`  |
+| `/npc spawn <uuid>`       | Permet de faire respawn le NPC.               | `customnpc.spawn` |
+| `/npc rotate`      | Fait pivoter un PNJ existant.                            | `customnpc.rotate`|
+| `/npc armor`       | Met une armure à votre NPC                               | `customnpc.armor` |
+| `/npc uuid`       | Donne l'uuid du npc frappé                             | `customnpc.uuid` |
+| `/npc list`       | Liste de tout les npcs                       | `customnpc.list` |
+| `/npc fakeplayer <uuid>`       | Ouvre un GUI de "Fake Player" pour le npc             | `customnpc.fakeplayer` |
+| `/npc admin`       | Donne une wand + voit le joueur qui a crée le npc | `customnpc.admin` |
 
 ---
 
 ## 🧰 Interface graphique (GUI)
 
-Lorsque vous utilisez la baguette (`/npcwand`), une **interface intuitive** s’ouvre avec plusieurs catégories :
+Lorsque vous utilisez la baguette (`/npc wand`), une **interface intuitive** s’ouvre avec plusieurs catégories :
 
 -  **Info** – Informations générales sur le PNJ + Contrôle des npcs
 - **Combat** – Paramètres liés aux interactions de combat  
@@ -35,6 +35,7 @@ Lorsque vous utilisez la baguette (`/npcwand`), une **interface intuitive** s’
 
 ## 🧩 Fonctionnalités principales
 
+- 🥢 Clic droit permet de faire spawn un npc, clic gauche permet de le modifier
 - ✅ Apparition et rotation des PNJ en jeu  
 - 🪄 Interface graphique interactive via la baguette magique  
 - ⚙️ Personnalisation avancée des PNJ (informations, actions, etc.)  
