@@ -1,4 +1,4 @@
-name: Custom-NPCs PMP 5.0.0
+name: CustomNPC
 version: 2.2.0-dev
 main: CustomNPC\Main
 api: 5.0.0
@@ -6,30 +6,13 @@ author: AlexisV
 description: Plugin de NPCs personnalisables avec IA
 
 commands:
-  npcwand:
-    description: Obtenir la baguette NPC
-    permission: customnpc.wand
-  npcspawn:
-    description: Créer un NPC
-    permission: customnpc.spawn
-  npcrotate:
-    description: Change la rotation du npc
-    usage: /npcrotate <uuid>
-    permission: customnpc.rotate
-  npcarmor:
-    description: Configurer l'armure d'un NPC
-    usage: /npcarmor <uuid>
-    permission: customnpc.armor
-  npclist:
-    description: Lister tous les NPCs
-    permission: customnpc.list
-  npcuuid:
-    description: Obtenir l'UUID d'un NPC au clic
-    permission: customnpc.uuid
-  npcfakeplayer:
-    description: Configurer un NPC comme Fake Player
-    usage: /npcfakeplayer <uuid>
-    permission: customnpc.fakeplayer
+  npc:
+    description: Commandes NPC admin
+    usage: /npc <admin|wand|delete|rotate|armor|list|skin|listskins|debug|refresh|uuid|fakeplayer>
+    permission: customnpc.admin
+  npcadmin:
+    description: Activer le mode admin NPC
+    permission: customnpc.admin
 
 
 permissions:
@@ -56,5 +39,8 @@ permissions:
     default: op
   customnpc.sudo:
     description: Permet s'utiliser le /sudo
+    default: op
+  customnpc.admin:
+    description: Permet d'activer le mode admin NPC
     default: op
 

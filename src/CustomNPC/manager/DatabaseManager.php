@@ -78,7 +78,8 @@ class DatabaseManager {
             armor_chestplate TEXT,
             armor_leggings TEXT,
             armor_boots TEXT,
-            armor_hand TEXT
+            armor_hand TEXT,
+            creator TEXT
         )");
 
         try {
@@ -88,6 +89,11 @@ class DatabaseManager {
         
         try {
             $this->database->exec("ALTER TABLE npcs ADD COLUMN saved_skin TEXT");
+        } catch(\Exception $e) {
+        }
+
+        try {
+            $this->database->exec("ALTER TABLE npcs ADD COLUMN creator TEXT DEFAULT ''");
         } catch(\Exception $e) {
         }
         
@@ -146,13 +152,15 @@ class DatabaseManager {
                 armor_chestplate VARCHAR(255),
                 armor_leggings VARCHAR(255),
                 armor_boots VARCHAR(255),
-                armor_hand VARCHAR(255)
+                armor_hand VARCHAR(255),
+                creator VARCHAR(255) DEFAULT ''
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
             
             $this->database->query($query);
             
             $this->database->query("ALTER TABLE npcs ADD COLUMN command_enabled TINYINT(1) DEFAULT 0");
             $this->database->query("ALTER TABLE npcs ADD COLUMN saved_skin TEXT");
+            $this->database->query("ALTER TABLE npcs ADD COLUMN creator VARCHAR(255) DEFAULT ''");
             
             $this->plugin->getLogger()->info("MySQL connecté avec succès à {$host}:{$port}/{$database}");
             
@@ -235,10 +243,12 @@ class DatabaseManager {
             ],
             "yaw" => (float)$row["yaw"],
             "pitch" => (float)$row["pitch"],
+            "creator" => $row["creator"] ?? "",
         ];
     }
 
     public function saveNPC(string $uuid, array $data): void {
+        $this->plugin->debugLog("Saving NPC '{$data['title']}' ({$uuid}) to database ({$this->type})");
         if($this->type === "sqlite") {
             $this->saveNPCSQLite($uuid, $data);
         } else {
@@ -256,14 +266,14 @@ class DatabaseManager {
                 arrow_attack, arrow_speed, effect_on_hit, can_regen, regen_amount,
                 size, skin, saved_skin, immobile, auto_respawn, can_be_hit, command_enabled,
                 commands, drops, armor_helmet, armor_chestplate, armor_leggings,
-                armor_boots, armor_hand
+                armor_boots, armor_hand, creator
             ) VALUES (
                 :uuid, :title, :subtitle, :pos_x, :pos_y, :pos_z, :world, :yaw, :pitch,
                 :health, :max_health, :speed, :aggressive, :attack_speed, :attack_damage,
                 :arrow_attack, :arrow_speed, :effect_on_hit, :can_regen, :regen_amount,
                 :size, :skin, :saved_skin, :immobile, :auto_respawn, :can_be_hit, :command_enabled,
                 :commands, :drops, :armor_helmet, :armor_chestplate, :armor_leggings,
-                :armor_boots, :armor_hand
+                :armor_boots, :armor_hand, :creator
             )
         ");
         
@@ -301,6 +311,7 @@ class DatabaseManager {
         $stmt->bindValue(":armor_leggings", $data["armor"]["leggings"] ?? "");
         $stmt->bindValue(":armor_boots", $data["armor"]["boots"] ?? "");
         $stmt->bindValue(":armor_hand", $data["armor"]["hand"] ?? "");
+        $stmt->bindValue(":creator", $data["creator"] ?? "");
         
         $stmt->execute();
     }
@@ -315,14 +326,14 @@ class DatabaseManager {
                 arrow_attack, arrow_speed, effect_on_hit, can_regen, regen_amount,
                 size, skin, saved_skin, immobile, auto_respawn, can_be_hit, command_enabled,
                 commands, drops, armor_helmet, armor_chestplate, armor_leggings,
-                armor_boots, armor_hand
+                armor_boots, armor_hand, creator
             ) VALUES (
                 ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
-                ?, ?
+                ?, ?, ?
             )
             ON DUPLICATE KEY UPDATE
                 title=VALUES(title), subtitle=VALUES(subtitle),
@@ -338,7 +349,8 @@ class DatabaseManager {
                 command_enabled=VALUES(command_enabled), commands=VALUES(commands),
                 drops=VALUES(drops), armor_helmet=VALUES(armor_helmet),
                 armor_chestplate=VALUES(armor_chestplate), armor_leggings=VALUES(armor_leggings),
-                armor_boots=VALUES(armor_boots), armor_hand=VALUES(armor_hand)
+                armor_boots=VALUES(armor_boots), armor_hand=VALUES(armor_hand),
+                creator=VALUES(creator)
         ");
         
         $savedSkinJson = isset($data["savedSkin"]) ? json_encode($data["savedSkin"]) : null;
@@ -375,9 +387,10 @@ class DatabaseManager {
         $leggings = $data["armor"]["leggings"] ?? "";
         $boots = $data["armor"]["boots"] ?? "";
         $hand = $data["armor"]["hand"] ?? "";
+        $creator = $data["creator"] ?? "";
 
         $stmt->bind_param(
-            "sssdddsddddiiiiiisiiidssiiiisssssss",
+            "sssdddsddddiiiiiisiiidssiiiissssssss",
             $uuid,
             $title,
             $subtitle,
@@ -411,7 +424,8 @@ class DatabaseManager {
             $chestplate,
             $leggings,
             $boots,
-            $hand
+            $hand,
+            $creator
         );
         
         $stmt->execute();
@@ -419,6 +433,7 @@ class DatabaseManager {
     }
 
     public function deleteNPC(string $uuid): void {
+        $this->plugin->debugLog("Deleting NPC '{$uuid}' from database ({$this->type})");
         if($this->type === "sqlite") {
             $stmt = $this->database->prepare("DELETE FROM npcs WHERE uuid = :uuid");
             $stmt->bindValue(":uuid", $uuid);

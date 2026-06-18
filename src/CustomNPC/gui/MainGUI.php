@@ -130,6 +130,7 @@ class MainGUI {
             "world" => $player->getWorld()->getFolderName()
         ];
         $data["runtimeId"] = 0;
+        $data["creator"] = $player->getName();
         
         $newUuid = $this->npcManager->createNPC($data);
         $this->npcManager->spawnNPC($player->getWorld(), $newUuid);

@@ -18,47 +18,99 @@ class NPCCommandHandler {
     }
 
     public function handleCommand(Player $player, string $commandName, array $args): bool {
-        switch($commandName) {
-            case "npcwand":
-                return $this->handleWandCommand($player);
-            
-            case "npcspawn":
-                return $this->handleSpawnCommand($player, $args);
-            
-            case "npcdelete":
-                return $this->handleDeleteCommand($player, $args);
-            
-            case "npcarmor":
-                return $this->handleArmorCommand($player, $args);
-            
-            case "npclist":
-                return $this->handleListCommand($player);
-            
-            case "npcskin":
-                return $this->handleSkinCommand($player, $args);
-            
-            case "npclistskins":
-                return $this->handleListSkinsCommand($player);
-            
-            case "npcdebug":
-                return $this->handleDebugCommand($player);
-            
-            case "npcrefresh":
-                return $this->handleRefreshCommand($player);
-            
-            case "npcrotate":
-                return $this->handleRotateCommand($player, $args);
-
-
-            case "npcuuid":
-                return $this->handleUuidCommand($player);
-
-            case "npcfakeplayer":
-                return $this->handleFakePlayerCommand($player, $args);
-            
-            default:
-                return false;
+        if($commandName === "npcadmin") {
+            return $this->handleNpcAdminCommand($player, ["admin"]);
         }
+
+        if($commandName !== "npc") {
+            return false;
+        }
+
+        if(empty($args)) {
+            $this->sendHelpMessage($player);
+            return true;
+        }
+
+        $subCommand = strtolower($args[0]);
+        $subArgs = array_slice($args, 1);
+
+        switch($subCommand) {
+            case "admin":
+                return $this->handleNpcAdminCommand($player, ["admin"]);
+            case "wand":
+                return $this->handleWandCommand($player);
+            case "delete":
+                return $this->handleDeleteCommand($player, $subArgs);
+            case "rotate":
+                return $this->handleRotateCommand($player, $subArgs);
+            case "armor":
+                return $this->handleArmorCommand($player, $subArgs);
+            case "list":
+                return $this->handleListCommand($player);
+            case "skin":
+                return $this->handleSkinCommand($player, $subArgs);
+            case "listskins":
+                return $this->handleListSkinsCommand($player);
+            case "debug":
+                return $this->handleDebugCommand($player);
+            case "refresh":
+                return $this->handleRefreshCommand($player);
+            case "uuid":
+                return $this->handleUuidCommand($player);
+            case "fakeplayer":
+                return $this->handleFakePlayerCommand($player, $subArgs);
+            default:
+                $this->sendHelpMessage($player);
+                return true;
+        }
+    }
+
+    private function sendHelpMessage(Player $player): void {
+        $player->sendMessage("§e=== Commandes CustomNPC ===");
+        $player->sendMessage("§b/npc admin §7- Activer/désactiver le mode admin (affiche les tags de créateurs)");
+        $player->sendMessage("§b/npc wand §7- Obtenir la baguette NPC");
+        $player->sendMessage("§b/npc delete <uuid> §7- Supprimer un NPC");
+        $player->sendMessage("§b/npc rotate <uuid> §7- Tourner un NPC vers toi");
+        $player->sendMessage("§b/npc armor <uuid> §7- Configurer l'armure d'un NPC");
+        $player->sendMessage("§b/npc list §7- Lister tous les NPCs");
+        $player->sendMessage("§b/npc skin <uuid> <skin> §7- Changer le skin d'un NPC");
+        $player->sendMessage("§b/npc listskins §7- Lister les skins disponibles");
+        $player->sendMessage("§b/npc debug §7- Voir les informations de debug dans la console");
+        $player->sendMessage("§b/npc refresh §7- Rafraîchir les NPCs de ton monde");
+        $player->sendMessage("§b/npc uuid §7- Activer le clic pour voir l'UUID d'un NPC");
+        $player->sendMessage("§b/npc fakeplayer <uuid> §7- Configurer un NPC en Fake Player");
+    }
+
+    private function handleNpcAdminCommand(Player $player, array $args): bool {
+        if(!isset($args[0]) || strtolower($args[0]) !== "admin") {
+            $player->sendMessage("§cUsage: /npc admin");
+            return true;
+        }
+
+        $isAdmin = $this->npcManager->isAdmin($player->getName());
+        $this->npcManager->setAdmin($player->getName(), !$isAdmin);
+
+        if(!$isAdmin) {
+            // On active le mode admin
+            $wand = \pocketmine\item\VanillaItems::WOODEN_HOE()->setCustomName(Constants::NPC_WAND_NAME);
+            $player->getInventory()->addItem($wand);
+            $player->sendMessage("§a§lMode NPC Admin activé !");
+            $player->sendMessage("§eTu as reçu la NPC Wand.");
+            $player->sendMessage("§7Clic gauche = Éditer | Clic droit = Créer un NPC");
+        } else {
+            // On désactive le mode admin
+            foreach($player->getInventory()->getContents() as $index => $item) {
+                if($item->getCustomName() === Constants::NPC_WAND_NAME) {
+                    $player->getInventory()->setItem($index, \pocketmine\item\VanillaItems::AIR());
+                }
+            }
+            $player->sendMessage("§c§lMode NPC Admin désactivé.");
+            $player->sendMessage("§eLa NPC Wand a été retirée de ton inventaire.");
+        }
+
+        // Rafraîchir les nametags pour ce joueur
+        $this->npcManager->refreshNPCsForPlayer($player);
+        return true;
     }
 
     private function handleWandCommand(Player $player): bool {
@@ -110,6 +162,7 @@ class NPCCommandHandler {
             $location->getYaw(),
             $location->getPitch()
         );
+        $data["creator"] = $player->getName();
         
         $uuid = $this->npcManager->createNPC($data);
         $this->npcManager->spawnNPC($player->getWorld(), $uuid);

@@ -107,6 +107,18 @@ class Main extends PluginBase {
         return self::$instance;
     }
 
+    public function debugLog(string $message): void {
+        if((bool)$this->getConfig()->getNested("debug.enabled", false)) {
+            $this->getLogger()->info("§d[DEBUG] " . $message);
+        }
+    }
+
+    public function debugLogAll(string $message): void {
+        if((bool)$this->getConfig()->getNested("debug.log_all_messages", false)) {
+            $this->getLogger()->info("§5[DEBUG-ALL] " . $message);
+        }
+    }
+
     public function getNPCManager(): NPCManager {
         return $this->npcManager;
     }

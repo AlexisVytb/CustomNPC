@@ -14,30 +14,30 @@ class SkinManager {
     
     public function loadSkin(string $skinPath, ?Player $player = null): Skin {
         if($player !== null) {
-            $this->plugin->getLogger()->info("§aCopie du skin du joueur: " . $player->getName());
+            $this->plugin->debugLogAll("§aCopie du skin du joueur: " . $player->getName());
             return $player->getSkin();
         }
 
         if(empty($skinPath)) {
-            $this->plugin->getLogger()->info("§7Utilisation du skin par défaut (aucun skin spécifié)");
+            $this->plugin->debugLogAll("§7Utilisation du skin par défaut (aucun skin spécifié)");
             return $this->getDefaultSkin();
         }
 
         if(strpos($skinPath, "player_") === 0) {
-            $this->plugin->getLogger()->info("§7Skin de joueur sauvegardé détecté: {$skinPath}");
+            $this->plugin->debugLogAll("§7Skin de joueur sauvegardé détecté: {$skinPath}");
             return $this->getDefaultSkin(); 
         }
 
         if(strpos($skinPath, "player:") === 0) {
             $playerName = substr($skinPath, 7);
-            $this->plugin->getLogger()->info("§eTentative de copie du skin du joueur: {$playerName}");
+            $this->plugin->debugLogAll("§eTentative de copie du skin du joueur: {$playerName}");
             
             $targetPlayer = $this->plugin->getServer()->getPlayerByPrefix($playerName);
             
             if($targetPlayer !== null) {
-                $this->plugin->getLogger()->info("§aJoueur trouvé ! Copie du skin...");
+                $this->plugin->debugLogAll("§aJoueur trouvé ! Copie du skin...");
                 $skin = $targetPlayer->getSkin();
-                $this->plugin->getLogger()->info("§aSkin copié avec succès ! ID: " . $skin->getSkinId());
+                $this->plugin->debugLogAll("§aSkin copié avec succès ! ID: " . $skin->getSkinId());
                 return $skin;
             } else {
                 $this->plugin->getLogger()->warning("§cJoueur introuvable: {$playerName}");
@@ -48,12 +48,12 @@ class SkinManager {
         
         $fullPath = $this->plugin->getDataFolder() . "skins/" . $skinPath;
         
-        $this->plugin->getLogger()->info("§eTentative de chargement du skin: {$fullPath}");
+        $this->plugin->debugLogAll("§eTentative de chargement du skin: {$fullPath}");
         
         if(file_exists($fullPath)) {
             try {
                 $skin = $this->loadSkinFromFile($fullPath);
-                $this->plugin->getLogger()->info("§aSkin chargé avec succès: {$skinPath}");
+                $this->plugin->debugLogAll("§aSkin chargé avec succès: {$skinPath}");
                 return $skin;
             } catch(\Exception $e) {
                 $this->plugin->getLogger()->error("Erreur chargement skin: " . $e->getMessage());

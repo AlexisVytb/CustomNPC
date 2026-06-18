@@ -77,6 +77,7 @@ class NPCBehaviorTask extends Task {
         }
 
         if($distance < Constants::NPC_ATTACK_RANGE && !($data["arrowAttack"] ?? false) && $this->npcManager->canAttack($uuid)) {
+            \CustomNPC\Main::getInstance()->debugLog("NPC '{$data['title']}' ({$uuid}) melee attacked player '{$target->getName()}' doing " . ($data["attackDamage"] ?? 1) . " damage");
             $event = new EntityDamageByEntityEvent($npc, $target, EntityDamageEvent::CAUSE_ENTITY_ATTACK, $data["attackDamage"] ?? 1);
             $target->attack($event);
 
@@ -87,6 +88,7 @@ class NPCBehaviorTask extends Task {
 
         if(($data["arrowAttack"] ?? false) && $this->npcManager->canAttack($uuid)) {
              if($distance <= Constants::NPC_AGGRO_RADIUS) {
+                 \CustomNPC\Main::getInstance()->debugLog("NPC '{$data['title']}' ({$uuid}) shot arrow at player '{$target->getName()}'");
                  $this->shootArrow($npc, $target, $data);
              }
         }

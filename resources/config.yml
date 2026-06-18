@@ -18,3 +18,7 @@ settings:
   auto-save-interval: 60
   
   wand-detection-radius: 5.0
+
+debug:
+  enabled: false
+  log_all_messages: false

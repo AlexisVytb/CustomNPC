@@ -5,11 +5,15 @@ namespace CustomNPC\listener;
 use pocketmine\event\Listener;
 use pocketmine\event\player\PlayerInteractEvent;
 use pocketmine\event\player\PlayerJoinEvent;
+use pocketmine\event\block\BlockBreakEvent;
+use pocketmine\event\entity\EntityTeleportEvent;
+use pocketmine\event\server\DataPacketSendEvent;
 use pocketmine\event\entity\EntityDamageEvent;
 use pocketmine\event\entity\EntityDamageByEntityEvent;
 use pocketmine\event\entity\EntityDeathEvent;
 use pocketmine\player\Player;
 use pocketmine\entity\Living;
+use pocketmine\entity\Human;
 use pocketmine\entity\effect\EffectInstance;
 use pocketmine\entity\projectile\Projectile;
 use pocketmine\entity\location;
@@ -19,6 +23,10 @@ use pocketmine\event\world\ChunkUnloadEvent;
 use pocketmine\entity\effect\StringToEffectParser;
 use pocketmine\item\VanillaItems;
 use pocketmine\scheduler\Task;
+use pocketmine\network\mcpe\protocol\AddPlayerPacket;
+use pocketmine\network\mcpe\protocol\SetActorDataPacket;
+use pocketmine\network\mcpe\protocol\types\entity\EntityMetadataProperties;
+use pocketmine\network\mcpe\protocol\types\entity\StringMetadataProperty;
 use CustomNPC\manager\NPCManager;
 use CustomNPC\utils\Constants;
 use CustomNPC\utils\ItemParser;
@@ -29,6 +37,7 @@ use CustomNPC\Main;
 class NPCEventListener implements Listener {
 
     private NPCManager $npcManager;
+    private bool $isSendingCustomPackets = false;
 
     public function __construct(NPCManager $npcManager) {
         $this->npcManager = $npcManager;
@@ -87,8 +96,17 @@ class NPCEventListener implements Listener {
         $block = $event->getBlock();
 
         if($item->getCustomName() === Constants::NPC_WAND_NAME) {
-            $this->handleWandClick($player);
             $event->cancel();
+            
+            if(!$player->hasPermission("customnpc.admin") && !$this->npcManager->isAdmin($player->getName())) {
+                return;
+            }
+
+            if($event->getAction() === PlayerInteractEvent::LEFT_CLICK_BLOCK) {
+                $this->handleWandEditClick($player);
+            } elseif($event->getAction() === PlayerInteractEvent::RIGHT_CLICK_BLOCK) {
+                $this->handleWandCreateClick($player);
+            }
             return;
         }
 
@@ -98,7 +116,7 @@ class NPCEventListener implements Listener {
         }
     }
 
-    private function handleWandClick(Player $player): void {
+    private function handleWandEditClick(Player $player): void {
         $playerPos = $player->getPosition();
         $world = $player->getWorld();
         
@@ -122,9 +140,28 @@ class NPCEventListener implements Listener {
             (new MainGUI($this->npcManager))->open($player, $closestNpc);
             $player->sendMessage("§aNPC trouvé : " . ($this->npcManager->getNPCData($closestNpc)["title"] ?? "NPC"));
         } else {
-            $player->sendMessage("§cAucun NPC trouvé à proximité");
-            (new MainGUI($this->npcManager))->open($player);
+            $player->sendMessage("§cAucun NPC trouvé à proximité pour édition.");
         }
+    }
+
+    private function handleWandCreateClick(Player $player): void {
+        $pos = $player->getPosition();
+        $location = $player->getLocation();
+        
+        $data = $this->npcManager->getDefaultNPCDataWithRotation(
+            $pos->getX(),
+            $pos->getY(),
+            $pos->getZ(),
+            $player->getWorld()->getFolderName(),
+            $location->getYaw(),
+            $location->getPitch()
+        );
+        $data["creator"] = $player->getName();
+        
+        $uuid = $this->npcManager->createNPC($data);
+        $this->npcManager->spawnNPC($player->getWorld(), $uuid);
+        
+        $player->sendMessage("§aNPC créé avec ton orientation ! UUID: §e$uuid");
     }
 
     private function handleNPCItemPlace(Player $player, $item, $block): void {
@@ -214,6 +251,8 @@ class NPCEventListener implements Listener {
         
         $npcData = $this->npcManager->getNPCData($npcUuid);
         if($npcData === null) return;
+        
+        Main::getInstance()->debugLog("NPC '{$npcData['title']}' ({$npcUuid}) received EntityDamageEvent (cause: " . $event->getCause() . ", raw damage: " . $event->getBaseDamage() . ", final damage: " . $event->getFinalDamage() . ")");
         
         $canBeHit = $npcData["canBeHit"] ?? true;
         
@@ -356,6 +395,10 @@ class NPCEventListener implements Listener {
     private function executeCommands(array $commands, Player $player): void {
         if(empty($commands)) return;
         
+        $commandStrings = array_map(function($cmd) {
+            return is_array($cmd) ? json_encode($cmd) : (string)$cmd;
+        }, $commands);
+        Main::getInstance()->debugLog("NPC command execution triggered for player {$player->getName()}: " . implode(", ", $commandStrings));
         foreach($commands as $cmd) {
             if(is_string($cmd) && !empty(trim($cmd))) {
                 $cmd = str_replace("{player}", $player->getName(), $cmd);
@@ -407,5 +450,148 @@ class NPCEventListener implements Listener {
             }
             $event->setDrops($customDrops);
         }
+    }
+
+    public function onBlockBreak(BlockBreakEvent $event): void {
+        $player = $event->getPlayer();
+        $item = $player->getInventory()->getItemInHand();
+        if($item->getCustomName() === Constants::NPC_WAND_NAME) {
+            $event->cancel();
+        }
+    }
+
+    public function onPlayerJoin(PlayerJoinEvent $event): void {
+        $this->npcManager->refreshNPCsForPlayer($event->getPlayer());
+    }
+
+    public function onEntityTeleport(EntityTeleportEvent $event): void {
+        $entity = $event->getEntity();
+        if($entity instanceof Player) {
+            Main::getInstance()->getScheduler()->scheduleDelayedTask(new class($this->npcManager, $entity) extends Task {
+                private NPCManager $manager;
+                private Player $player;
+                public function __construct(NPCManager $manager, Player $player) {
+                    $this->manager = $manager;
+                    $this->player = $player;
+                }
+                public function onRun(): void {
+                    if(!$this->player->isClosed()) {
+                        $this->manager->refreshNPCsForPlayer($this->player);
+                    }
+                }
+            }, 10);
+        }
+    }
+
+    public function onPacketSend(DataPacketSendEvent $event): void {
+        if($this->isSendingCustomPackets) return;
+
+        $packets = $event->getPackets();
+        $targets = $event->getTargets();
+        
+        $hasNpcPacket = false;
+        foreach($packets as $pk) {
+            if($pk instanceof AddPlayerPacket || $pk instanceof SetActorDataPacket) {
+                $hasNpcPacket = true;
+                break;
+            }
+        }
+        
+        if(!$hasNpcPacket) return;
+        
+        $admins = [];
+        $nonAdmins = [];
+        foreach($targets as $target) {
+            $player = $target->getPlayer();
+            if($player !== null && $this->npcManager->isAdmin($player->getName())) {
+                $admins[] = $target;
+            } else {
+                $nonAdmins[] = $target;
+            }
+        }
+        
+        if(empty($admins)) return;
+        
+        if(empty($nonAdmins)) {
+            $newPackets = [];
+            foreach($packets as $pk) {
+                $newPackets[] = $this->modifyPacketForAdmins($pk);
+            }
+            $event->setPackets($newPackets);
+            return;
+        }
+        
+        $event->cancel();
+        
+        $this->isSendingCustomPackets = true;
+        
+        foreach($nonAdmins as $session) {
+            foreach($packets as $pk) {
+                $session->sendDataPacket($pk);
+            }
+        }
+        
+        foreach($admins as $session) {
+            foreach($packets as $pk) {
+                $session->sendDataPacket($this->modifyPacketForAdmins(clone $pk));
+            }
+        }
+        
+        $this->isSendingCustomPackets = false;
+    }
+
+    private function modifyPacketForAdmins(\pocketmine\network\mcpe\protocol\ClientboundPacket $packet): \pocketmine\network\mcpe\protocol\ClientboundPacket {
+        if($packet instanceof AddPlayerPacket) {
+            $entityId = $packet->actorRuntimeId;
+            $uuid = $this->npcManager->findNPCByEntityId($entityId);
+            if($uuid !== null) {
+                $npcData = $this->npcManager->getNPCData($uuid);
+                $creator = $npcData["creator"] ?? "";
+                if($creator !== "") {
+                    $metadata = $packet->metadata;
+                    $title = $npcData["title"] ?? "NPC";
+                    $subtitle = $npcData["subtitle"] ?? "";
+                    $nameTag = $title;
+                    if($subtitle !== "") {
+                        $nameTag .= "\n" . $subtitle;
+                    }
+                    if($npcData["aggressive"] ?? false) {
+                        $nameTag .= "\n§c" . (int)($npcData["health"] ?? 100) . " §r/ §c" . (int)($npcData["maxHealth"] ?? 100);
+                    }
+                    $adminTag = $nameTag . "\n§l§cPlacer : §f" . $creator;
+                    
+                    $metadata[EntityMetadataProperties::NAMETAG] = new StringMetadataProperty($adminTag);
+                    $packet->metadata = $metadata;
+                }
+            }
+        } elseif($packet instanceof SetActorDataPacket) {
+            $entityId = $packet->actorRuntimeId;
+            $uuid = $this->npcManager->findNPCByEntityId($entityId);
+            if($uuid !== null) {
+                $npcData = $this->npcManager->getNPCData($uuid);
+                $creator = $npcData["creator"] ?? "";
+                if($creator !== "") {
+                    $metadata = $packet->metadata;
+                    $originalTag = "";
+                    if(isset($metadata[EntityMetadataProperties::NAMETAG])) {
+                        $originalTag = $metadata[EntityMetadataProperties::NAMETAG]->getValue();
+                    } else {
+                        $title = $npcData["title"] ?? "NPC";
+                        $subtitle = $npcData["subtitle"] ?? "";
+                        $originalTag = $title;
+                        if($subtitle !== "") {
+                            $originalTag .= "\n" . $subtitle;
+                        }
+                    }
+                    
+                    if(strpos($originalTag, "§l§cPlacer :") === false) {
+                        $adminTag = $originalTag . "\n§l§cPlacer : §f" . $creator;
+                        $metadata[EntityMetadataProperties::NAMETAG] = new StringMetadataProperty($adminTag);
+                        $packet->metadata = $metadata;
+                    }
+                }
+            }
+        }
+        return $packet;
     }
 }

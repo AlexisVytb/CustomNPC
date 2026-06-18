@@ -22,6 +22,7 @@ class NPCManager {
     private array $npcTargets = [];
     private array $npcLastAttack = [];
     private array $waitingForUuid = [];
+    private array $adminPlayers = [];
 
     public function __construct(Main $plugin, DatabaseManager $database) {
         $this->plugin = $plugin;
@@ -46,6 +47,80 @@ class NPCManager {
         
         $this->npcUuidByEntityId = [];
         $this->plugin->getLogger()->info("§aChargé " . count($this->npcData) . " NPCs depuis la base de données");
+        $this->loadAdmins();
+    }
+
+    private function loadAdmins(): void {
+        $file = $this->plugin->getDataFolder() . "admins.json";
+        if(file_exists($file)) {
+            $data = json_decode(file_get_contents($file), true);
+            $this->adminPlayers = is_array($data) ? $data : [];
+        }
+    }
+
+    private function saveAdmins(): void {
+        $file = $this->plugin->getDataFolder() . "admins.json";
+        file_put_contents($file, json_encode($this->adminPlayers));
+    }
+
+    public function isAdmin(string $playerName): bool {
+        return in_array(strtolower($playerName), $this->adminPlayers, true);
+    }
+
+    public function setAdmin(string $playerName, bool $value): void {
+        $key = strtolower($playerName);
+        if($value) {
+            if(!in_array($key, $this->adminPlayers, true)) {
+                $this->adminPlayers[] = $key;
+            }
+        } else {
+            $this->adminPlayers = array_values(array_filter($this->adminPlayers, fn($n) => $n !== $key));
+        }
+        $this->saveAdmins();
+    }
+
+    public function refreshNPCsForPlayer(\pocketmine\player\Player $player): void {
+        $world = $player->getWorld();
+        foreach($this->npcData as $uuid => $data) {
+            if($data["position"]["world"] !== $world->getFolderName()) continue;
+            $entityId = $data["runtimeId"] ?? 0;
+            if($entityId === 0) continue;
+            $entity = $world->getEntity($entityId);
+            if($entity === null || $entity->isClosed()) continue;
+
+            $creator = $data["creator"] ?? "";
+            $baseTag = $this->buildNameTag($data, $entity instanceof \pocketmine\entity\Living ? $entity : null, $uuid);
+
+            if($this->isAdmin($player->getName()) && $creator !== "") {
+                $adminTag = $baseTag . "\n§l§cPlacer : §f" . $creator;
+            } else {
+                $adminTag = $baseTag;
+            }
+
+            $pk = new \pocketmine\network\mcpe\protocol\SetActorDataPacket();
+            $pk = \pocketmine\network\mcpe\protocol\SetActorDataPacket::create(
+                $entityId,
+                [\pocketmine\network\mcpe\protocol\types\entity\EntityMetadataProperties::NAMETAG => new \pocketmine\network\mcpe\protocol\types\entity\StringMetadataProperty($adminTag)],
+                new \pocketmine\network\mcpe\protocol\types\entity\PropertySyncData([], []),
+                0
+            );
+            $player->getNetworkSession()->sendDataPacket($pk);
+        }
+    }
+
+    private function buildNameTag(array $data, ?\pocketmine\entity\Living $entity, string $uuid): string {
+        $title = $data["title"] ?? "NPC";
+        $subtitle = $data["subtitle"] ?? "";
+        $nameTag = $title;
+        if($subtitle !== "") {
+            $nameTag .= "\n" . $subtitle;
+        }
+        if(($data["aggressive"] ?? false) && $entity !== null) {
+            $health = (int)$entity->getHealth();
+            $maxHealth = (int)($data["maxHealth"] ?? 100);
+            $nameTag .= "\n§c" . $health . " §r/ §c" . $maxHealth;
+        }
+        return $nameTag;
     }
 
     public function saveAll(): void {
@@ -120,15 +195,16 @@ class NPCManager {
         $location = new Location($pos["x"], $pos["y"], $pos["z"], $world, $yaw, $pitch);
         $skinPath = $data["skin"] ?? "";
         
-        $this->plugin->getLogger()->info("§eChargement du skin pour NPC {$uuid}: '{$skinPath}'");
+        $this->plugin->debugLog("Spawning NPC '{$data['title']}' ({$uuid}) at {$pos['x']}, {$pos['y']}, {$pos['z']} in world '{$pos['world']}'");
+        $this->plugin->debugLogAll("§eChargement du skin pour NPC {$uuid}: '{$skinPath}'");
         if(isset($data["savedSkin"]) && is_array($data["savedSkin"]) && !empty($data["savedSkin"]["skinData"])) {
-            $this->plugin->getLogger()->info("§aUtilisation du skin sauvegardé");
+            $this->plugin->debugLogAll("§aUtilisation du skin sauvegardé");
             $skin = $this->loadSavedSkin($data["savedSkin"]);
         } else {
-            $this->plugin->getLogger()->info("§eChargement du skin depuis: {$skinPath}");
+            $this->plugin->debugLogAll("§eChargement du skin depuis: {$skinPath}");
             $skin = $this->skinManager->loadSkin($skinPath, null);
             if(strpos($skinPath, "player:") === 0 && $skin->getSkinId() !== "Standard_Steve") {
-                $this->plugin->getLogger()->info("§aSauvegarde du skin de joueur...");
+                $this->plugin->debugLogAll("§aSauvegarde du skin de joueur...");
                 $this->saveSkinData($uuid, $skin);
             }
         }
@@ -208,10 +284,10 @@ class NPCManager {
         $geometryName = $savedSkin["geometryName"] ?? "";
         $geometryData = base64_decode($savedSkin["geometryData"] ?? "");
         
-        $this->plugin->getLogger()->info("§eChargement skin sauvegardé:");
-        $this->plugin->getLogger()->info("  - ID: {$skinId}");
-        $this->plugin->getLogger()->info("  - Data length: " . strlen($skinData));
-        $this->plugin->getLogger()->info("  - Geometry: {$geometryName}");
+        $this->plugin->debugLogAll("§eChargement skin sauvegardé:");
+        $this->plugin->debugLogAll("  - ID: {$skinId}");
+        $this->plugin->debugLogAll("  - Data length: " . strlen($skinData));
+        $this->plugin->debugLogAll("  - Geometry: {$geometryName}");
         
         if(strlen($skinData) === 0) {
             $this->plugin->getLogger()->error("§cSkin data vide ! Utilisation du skin par défaut");
@@ -480,6 +556,7 @@ class NPCManager {
             "canBeHit" => true,
             "commands" => [],
             "drops" => [],
+            "creator" => "",
             "armor" => [
                 "helmet" => "",
                 "chestplate" => "",
