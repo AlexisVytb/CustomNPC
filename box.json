@@ -1,0 +1,7 @@
+{
+    "chmod": "0755",
+    "main": false,
+    "output": "CustomNPC.phar",
+    "directories": ["src", "vendor"],
+    "files": ["plugin.yml"]
+}
