@@ -14,6 +14,6 @@ class AutoSaveTask extends Task {
     }
 
     public function onRun(): void {
-        $this->npcManager->saveAll();
+        $this->npcManager->saveAll(false);
     }
 }

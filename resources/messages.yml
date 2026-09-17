@@ -1,0 +1,61 @@
+prefix: "§8[§6NPC§8] §r"
+
+general:
+  no-permission: "§cPermission manquante : §e{permission}"
+  player-only: "Cette commande doit etre executee en jeu."
+  npc-not-found: "§cNPC introuvable."
+  npc-not-matching: "§cAucun NPC ne correspond a §e{id}"
+  no-selection: "§cAucun NPC selectionne. Vise un NPC ou utilise §e/npc select§c."
+  none-nearby: "§cAucun NPC a proximite."
+  world-not-loaded: "§cMonde non charge."
+  inventory-full: "§cInventaire plein, libere une case puis refais la commande."
+  limit-reached: "§cLimite de NPCs atteinte dans ce monde ({max})."
+  invalid-item: "§cItem invalide ignore : §7{item}"
+
+npc:
+  created: "§aNPC cree et selectionne. §7UUID: §e{uuid}"
+  deleted: "§aNPC supprime : §e{title}"
+  selected: "§aNPC selectionne : §e{title}"
+  moved: "§aNPC deplace."
+  moved-here: "§aNPC deplace sur ta position."
+  teleported: "§aTeleporte au NPC."
+  respawned: "§aNPC respawne."
+  stored: "§aNPC range dans un item."
+  placed: "§aNPC place."
+  duplicated: "§aNPC duplique et selectionne. §7UUID: §e{uuid}"
+  refreshed: "§a{count} NPCs rafraichis."
+  id-set: "§aIdentifiant defini : §e{id}"
+  id-taken: "§cCet identifiant est deja utilise."
+  id-invalid: "§cIdentifiant invalide (lettres, chiffres, tirets uniquement)."
+
+admin:
+  enabled: "§aMode admin NPC active."
+  disabled: "§cMode admin NPC desactive."
+  wand-hint: "§7Clic gauche : editer §8| §7Clic droit : creer"
+  wand-received: "§aBaguette NPC recue."
+  wand-already: "§7Tu as deja la baguette NPC."
+
+shop:
+  closed: "§cCette boutique est fermee."
+  empty: "§cCette boutique n'a rien a proposer."
+  out-of-stock: "§cRupture de stock."
+  cannot-afford: "§cTu n'as pas de quoi payer."
+  inventory-full: "§cLibere de la place dans ton inventaire."
+  purchased: "§aEchange effectue : §e{item}"
+  permission-required: "§cCet echange requiert : §e{permission}"
+
+dialogue:
+  format: "§e{npc}§r §7> §f{line}"
+  node-missing: "§cDialogue interrompu."
+
+waypoint:
+  added: "§aPoint §e#{index}§a ajoute."
+  removed: "§aPoint §e#{index}§a supprime."
+  cleared: "§aTous les points ont ete supprimes."
+  empty: "§cAucun point enregistre."
+  need-two: "§cIl faut au moins deux points pour une patrouille."
+
+command:
+  cooldown: "§cEn cooldown : §e{seconds}s"
+  one-time-used: "§cCommande deja utilisee."
+  permission: "§cPermission requise : §e{permission}"

@@ -2,9 +2,11 @@
 
 namespace CustomNPC\gui;
 
-use pocketmine\player\Player;
 use jojoe77777\FormAPI\CustomForm;
+use pocketmine\player\Player;
 use CustomNPC\manager\NPCManager;
+use CustomNPC\utils\Constants;
+use CustomNPC\utils\ItemParser;
 
 class ArmorGUI {
 
@@ -14,37 +16,63 @@ class ArmorGUI {
         $this->npcManager = $npcManager;
     }
 
-    public function open(Player $player, string $uuid): void {
+    public function open(Player $player, ?string $uuid): void {
+        if($uuid === null) return;
+
         $data = $this->npcManager->getNPCData($uuid);
         if($data === null) {
-            $player->sendMessage("§cNPC introuvable !");
+            $player->sendMessage("§cNPC introuvable.");
             return;
         }
 
-        $form = new CustomForm(function(Player $player, $formData) use ($uuid) {
-            if($formData === null) return;
+        $labels = [
+            "helmet" => "Casque",
+            "chestplate" => "Plastron",
+            "leggings" => "Jambieres",
+            "boots" => "Bottes",
+            "hand" => "Main principale",
+            "offhand" => "Main secondaire"
+        ];
 
-            $armor = [
-                "helmet" => $formData[0],
-                "chestplate" => $formData[1],
-                "leggings" => $formData[2],
-                "boots" => $formData[3],
-                "hand" => $formData[4]
-            ];
+        $form = new CustomForm(function(Player $player, $result) use ($uuid) {
+            if($result === null) return;
+
+            $armor = $this->npcManager->getNPCData($uuid)["armor"] ?? [];
+            $index = 1;
+
+            foreach(Constants::ARMOR_SLOTS as $slot) {
+                $value = trim((string)$result[$index++]);
+
+                if($value === "") {
+                    $armor[$slot] = "";
+                    continue;
+                }
+
+                $item = ItemParser::parse($value);
+                $armor[$slot] = $item === null ? "" : ItemParser::serialize($item);
+
+                if($item === null) {
+                    $player->sendMessage("§cItem invalide ignore : §7" . $value);
+                }
+            }
 
             $this->npcManager->updateNPCData($uuid, ["armor" => $armor]);
-            $this->npcManager->updateNPC($player->getWorld(), $uuid);
+            $this->npcManager->updateNPC($uuid);
             $this->npcManager->saveNPC($uuid);
-            
-            $player->sendMessage("§aArmure configurée !");
+
+            $player->sendMessage("§aEquipement enregistre.");
+            (new MainGUI($this->npcManager))->open($player, $uuid);
         });
 
-        $form->setTitle("§cArmure du NPC");
-        $form->addInput("Casque (ID:META ou nom)", "ex: 310:0 ou diamond_helmet", $data["armor"]["helmet"] ?? "");
-        $form->addInput("Plastron (ID:META ou nom)", "ex: 311:0 ou diamond_chestplate", $data["armor"]["chestplate"] ?? "");
-        $form->addInput("Jambières (ID:META ou nom)", "ex: 312:0 ou diamond_leggings", $data["armor"]["leggings"] ?? "");
-        $form->addInput("Bottes (ID:META ou nom)", "ex: 313:0 ou diamond_boots", $data["armor"]["boots"] ?? "");
-        $form->addInput("Arme en main (ID:META ou nom)", "ex: 276:0 ou diamond_sword", $data["armor"]["hand"] ?? "");
+        $form->setTitle("§6Equipement du NPC");
+        $form->addLabel("§7Le virion InvMenu n'est pas disponible, saisie manuelle.\n§8Format: nom_item ou nom_item:meta:quantite");
+
+        foreach(Constants::ARMOR_SLOTS as $slot) {
+            $current = ItemParser::deserialize((string)($data["armor"][$slot] ?? ""));
+            $default = $current === null ? "" : strtolower(str_replace(" ", "_", $current->getVanillaName()));
+
+            $form->addInput($labels[$slot], "ex: diamond_helmet", $default);
+        }
 
         $player->sendForm($form);
     }

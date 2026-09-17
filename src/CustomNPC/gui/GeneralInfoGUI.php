@@ -2,8 +2,8 @@
 
 namespace CustomNPC\gui;
 
-use pocketmine\player\Player;
 use jojoe77777\FormAPI\CustomForm;
+use pocketmine\player\Player;
 use CustomNPC\manager\NPCManager;
 use CustomNPC\utils\Constants;
 
@@ -16,55 +16,67 @@ class GeneralInfoGUI {
     }
 
     public function open(Player $player, ?string $uuid): void {
-        if($uuid === null) {
-            $player->sendMessage("§cAucun NPC sélectionné !");
-            return;
-        }
+        if($uuid === null) return;
 
         $data = $this->npcManager->getNPCData($uuid);
         if($data === null) {
-            $player->sendMessage("§cNPC introuvable !");
+            $player->sendMessage("§cNPC introuvable.");
             return;
         }
 
-        $form = new CustomForm(function(Player $player, $formData) use ($uuid) {
-            if($formData === null) return;
+        $form = new CustomForm(function(Player $player, $result) use ($uuid) {
+            if($result === null) return;
 
-            $updates = [
-                "health" => max(Constants::MIN_HEALTH, min(Constants::MAX_HEALTH, (float)$formData[0])),
-                "maxHealth" => max(Constants::MIN_HEALTH, min(Constants::MAX_HEALTH, (float)$formData[1])),
-                "speed" => max(Constants::MIN_SPEED, min(Constants::MAX_SPEED, (int)$formData[2])),
-                "title" => $formData[3],
-                "subtitle" => $formData[4],
-                "aggressive" => $formData[5],
-                "autoRespawn" => $formData[6],
-                "canRegen" => $formData[7],
-                "commandEnabled" => $formData[9]
-            ];
-            
-            if($formData[7]) {
-                $updates["regenAmount"] = max(Constants::MIN_REGEN, min(Constants::MAX_REGEN, (int)$formData[8]));
+            $maxHealth = max(Constants::MIN_HEALTH, min(Constants::MAX_HEALTH, (float)$result[2]));
+            $health = max(Constants::MIN_HEALTH, min($maxHealth, (float)$result[1]));
+
+            $customId = trim((string)$result[3]);
+            if($customId !== "" && $this->npcManager->customIdExists($customId, $uuid)) {
+                $player->sendMessage("§cCet ID est deja pris, il n'a pas ete applique.");
+                $customId = (string)($this->npcManager->getNPCData($uuid)["customId"] ?? "");
             }
 
+            $updates = [
+                "title" => (string)$result[4],
+                "subtitle" => (string)$result[5],
+                "customId" => $customId,
+                "health" => $health,
+                "maxHealth" => $maxHealth,
+                "speed" => max(Constants::MIN_SPEED, min(Constants::MAX_SPEED, (int)$result[6])),
+                "aggressive" => (bool)$result[7],
+                "autoRespawn" => (bool)$result[8],
+                "canRegen" => (bool)$result[9],
+                "regenAmount" => max(Constants::MIN_REGEN, min(Constants::MAX_REGEN, (int)$result[10])),
+                "commandEnabled" => (bool)$result[11],
+                "canBeHit" => (bool)$result[12],
+                "immobile" => (bool)$result[13],
+                "lookAtPlayers" => (bool)$result[14]
+            ];
+
             $this->npcManager->updateNPCData($uuid, $updates);
-            $this->npcManager->updateNPC($player->getWorld(), $uuid);
+            $this->npcManager->updateNPC($uuid);
             $this->npcManager->saveNPC($uuid);
-            
-            $player->sendMessage("§aInfo générales modifiées !");
+
+            $player->sendMessage("§aInfos generales enregistrees.");
             (new MainGUI($this->npcManager))->open($player, $uuid);
         });
 
-        $form->setTitle("§aInfo Général");
-        $form->addInput("Vie actuelle", "1-200000", (string)($data["health"] ?? 100));
-        $form->addInput("Vie maximum", "1-200000", (string)($data["maxHealth"] ?? 100));
-        $form->addInput("Vitesse de déplacement", "1-10", (string)($data["speed"] ?? 1));
-        $form->addInput("Titre", "", $data["title"] ?? "NPC");
-        $form->addInput("Sous-titre", "", $data["subtitle"] ?? "");
-        $form->addToggle("Agressif", $data["aggressive"] ?? false);
-        $form->addToggle("Respawn automatique", $data["autoRespawn"] ?? false);
-        $form->addToggle("Peut se régénérer", $data["canRegen"] ?? false);
-        $form->addInput("Régénération (coeurs/seconde)", "1-100", (string)($data["regenAmount"] ?? 1));
-        $form->addToggle("§eActiver les commandes", $data["commandEnabled"] ?? false);
+        $form->setTitle("§aInfos generales");
+        $form->addLabel("§7Placeholders disponibles dans le titre et le sous-titre :\n§8{online} {max} {world_players} {world} {tps}");
+        $form->addInput("Vie actuelle", "1-200000", (string)(int)($data["health"] ?? 100));
+        $form->addInput("Vie maximum", "1-200000", (string)(int)($data["maxHealth"] ?? 100));
+        $form->addInput("ID court (optionnel)", "ex: spawn_hub", (string)($data["customId"] ?? ""));
+        $form->addInput("Titre", "", (string)($data["title"] ?? "NPC"));
+        $form->addInput("Sous-titre", "", (string)($data["subtitle"] ?? ""));
+        $form->addInput("Vitesse de deplacement", "1-10", (string)($data["speed"] ?? 1));
+        $form->addToggle("Agressif", (bool)($data["aggressive"] ?? false));
+        $form->addToggle("Respawn automatique", (bool)($data["autoRespawn"] ?? false));
+        $form->addToggle("Regeneration", (bool)($data["canRegen"] ?? false));
+        $form->addInput("Regeneration par seconde", "1-100", (string)($data["regenAmount"] ?? 1));
+        $form->addToggle("Activer les commandes", (bool)($data["commandEnabled"] ?? false));
+        $form->addToggle("Peut etre frappe", (bool)($data["canBeHit"] ?? true));
+        $form->addToggle("Immobile", (bool)($data["immobile"] ?? false));
+        $form->addToggle("Suit les joueurs du regard", (bool)($data["lookAtPlayers"] ?? false));
 
         $player->sendForm($form);
     }

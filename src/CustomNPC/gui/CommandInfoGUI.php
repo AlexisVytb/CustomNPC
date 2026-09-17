@@ -2,290 +2,253 @@
 
 namespace CustomNPC\gui;
 
-use pocketmine\player\Player;
 use jojoe77777\FormAPI\CustomForm;
 use jojoe77777\FormAPI\SimpleForm;
+use pocketmine\player\Player;
 use CustomNPC\manager\NPCManager;
 
 class CommandInfoGUI {
-    
+
     private NPCManager $npcManager;
-    
+
     public function __construct(NPCManager $npcManager) {
         $this->npcManager = $npcManager;
     }
-    
+
     public function open(Player $player, ?string $uuid): void {
-        if($uuid === null) {
-            $player->sendMessage("§cAucun NPC sélectionné !");
-            return;
-        }
-        
+        if($uuid === null) return;
+
         $data = $this->npcManager->getNPCData($uuid);
         if($data === null) {
-            $player->sendMessage("§cNPC introuvable !");
+            $player->sendMessage("§cNPC introuvable.");
             return;
         }
-        
-        if(!($data["commandEnabled"] ?? false)) {
-            $player->sendMessage("§cLe NPC doit avoir les commandes activées !");
-            $player->sendMessage("§eActive-les dans le menu Info du NPC");
-            (new MainGUI($this->npcManager))->open($player, $uuid);
-            return;
-        }
-        
-        $form = new SimpleForm(function(Player $player, $buttonIndex) use ($uuid) {
-            if($buttonIndex === null) {
+
+        $commands = $this->normalize($data["commands"] ?? []);
+        $count = count($commands);
+
+        $form = new SimpleForm(function(Player $player, $index) use ($uuid) {
+            if($index === null) {
                 (new MainGUI($this->npcManager))->open($player, $uuid);
                 return;
             }
-            
-            switch($buttonIndex) {
-                case 0:
-                    $this->openAddCommand($player, $uuid);
-                    break;
-                case 1:
-                    $this->openCommandList($player, $uuid);
-                    break;
-                case 2:
-                    (new MainGUI($this->npcManager))->open($player, $uuid);
-                    break;
+
+            switch($index) {
+                case 0: $this->openAdd($player, $uuid); break;
+                case 1: $this->openList($player, $uuid); break;
+                case 2: $this->resetUsage($player, $uuid); break;
+                case 3: (new MainGUI($this->npcManager))->open($player, $uuid); break;
             }
         });
-        
-        $form->setTitle("§6Gestion des Commandes");
-        
-        $data = $this->npcManager->getNPCData($uuid);
-        $commands = $data["commands"] ?? [];
-        $commandCount = count($commands);
-        
-        $content = "§7NPC: §e" . ($data["name"] ?? "Sans nom") . "\n";
-        $content .= "§7Commandes configurées: §b{$commandCount}\n";
-        $content .= "§8━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
-        $content .= "§7Clique sur le NPC pour exécuter les commandes";
-        
-        $form->setContent($content);
-        $form->addButton("§a+ Ajouter une commande\n§8Créer une nouvelle commande", 0, "textures/ui/color_plus");
-        $form->addButton("§eVoir les commandes ({$commandCount})\n§8Gérer les commandes existantes", 0, "textures/ui/book");
-        $form->addButton("§c« Retour\n§8Menu principal", 0, "textures/ui/cancel");
-        
+
+        $form->setTitle("§3Commandes");
+        $form->setContent(
+            "§7NPC: §e" . ($data["title"] ?? "NPC") . "\n" .
+            "§7Commandes: §b" . $count . "\n" .
+            "§7Etat: " . (($data["commandEnabled"] ?? false) ? "§aactivees" : "§cdesactivees") . "\n" .
+            "§8Active-les dans les infos generales si besoin."
+        );
+
+        $form->addButton("§aAjouter une commande", 0, "textures/ui/color_plus");
+        $form->addButton("§eVoir les commandes (" . $count . ")", 0, "textures/ui/book");
+        $form->addButton("§6Reinitialiser les usages uniques", 0, "textures/ui/refresh");
+        $form->addButton("§cRetour", 0, "textures/ui/cancel");
+
         $player->sendForm($form);
     }
-    private function openAddCommand(Player $player, string $uuid): void {
-        $form = new CustomForm(function(Player $player, $formData) use ($uuid) {
-            if($formData === null) {
+
+    private function normalize(array $commands): array {
+        $normalized = [];
+
+        foreach($commands as $entry) {
+            if(is_string($entry)) {
+                $normalized[] = [
+                    "id" => md5($entry),
+                    "command" => $entry,
+                    "executor" => "console",
+                    "cooldown" => 0,
+                    "permission" => null,
+                    "oneTime" => false
+                ];
+            } elseif(is_array($entry) && isset($entry["command"])) {
+                $entry["id"] = (string)($entry["id"] ?? uniqid("cmd_"));
+                $normalized[] = $entry;
+            }
+        }
+
+        return $normalized;
+    }
+
+    private function openAdd(Player $player, string $uuid): void {
+        $form = new CustomForm(function(Player $player, $result) use ($uuid) {
+            if($result === null) {
                 $this->open($player, $uuid);
                 return;
             }
-            
-            $command = trim($formData[1]);
-            $executor = $formData[2];
-            $cooldown = max(0, (int)$formData[3]);
-            $permission = trim($formData[4]);
-            $oneTime = $formData[5];
-            
-            if(empty($command)) {
-                $player->sendMessage("§cLa commande ne peut pas être vide !");
-                $this->openAddCommand($player, $uuid);
+
+            $command = ltrim(trim((string)$result[1]), "/");
+
+            if($command === "") {
+                $player->sendMessage("§cLa commande ne peut pas etre vide.");
+                $this->openAdd($player, $uuid);
                 return;
             }
-            
-            if(str_starts_with($command, "/")) {
-                $command = substr($command, 1);
-            }
-            
-            $data = $this->npcManager->getNPCData($uuid);
-            $commands = $data["commands"] ?? [];
-            
-            $commandData = [
+
+            $permission = trim((string)$result[4]);
+
+            $entry = [
+                "id" => uniqid("cmd_"),
                 "command" => $command,
-                "executor" => $executor === 0 ? "player" : "console",
-                "cooldown" => $cooldown,
-                "permission" => empty($permission) ? null : $permission,
-                "oneTime" => $oneTime
+                "executor" => ((int)$result[2] === 0) ? "player" : "console",
+                "cooldown" => max(0, (int)$result[3]),
+                "permission" => $permission === "" ? null : $permission,
+                "oneTime" => (bool)$result[5]
             ];
-            
-            $commands[] = $commandData;
-            
+
+            $data = $this->npcManager->getNPCData($uuid);
+            $commands = $this->normalize($data["commands"] ?? []);
+            $commands[] = $entry;
+
             $this->npcManager->updateNPCData($uuid, ["commands" => $commands]);
             $this->npcManager->saveNPC($uuid);
-            
-            $executorText = $executor === 0 ? "§eJoueur" : "§cConsole";
-            $player->sendMessage("§aCommande ajoutée !");
-            $player->sendMessage("§7§eCommande: §b/{$command}");
-            $player->sendMessage("§7§eExécuteur: {$executorText}");
-            if($cooldown > 0) {
-                $player->sendMessage("§7§eCooldown: §b{$cooldown}s");
-            }
-            if(!empty($permission)) {
-                $player->sendMessage("§7§ePermission: §b{$permission}");
-            }
-            if($oneTime) {
-                $player->sendMessage("§7§eUsage: §6Une seule fois");
-            }
+
+            $player->sendMessage("§aCommande ajoutee : §b/" . $command);
             $this->open($player, $uuid);
         });
-        
-        $form->setTitle("§aAjouter une Commande");
-        
-        $form->addLabel("§7Ajoute une commande qui sera exécutée\n§7quand un joueur clique sur le NPC\n§8━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        
-        $form->addInput(
-            "§eCommande §7(sans le /)\n§8Placeholders: §7{player}, {x}, {y}, {z}",
-            "gamemode creative {player}",
-            ""
-        );
-        
-        $form->addDropdown(
-            "§eExécutée par",
-            ["§eJoueur §7(celui qui clique)", "§cConsole §7(le serveur)"],
-            0
-        );
-        
-        $form->addInput(
-            "§eCooldown §7(secondes)\n§80 = pas de cooldown",
-            "0",
-            "0"
-        );
-        
-        $form->addInput(
-            "§ePermission requise §7(optionnel)\n§8Laisse vide si aucune",
-            "customnpc.use",
-            ""
-        );
-        
-        $form->addToggle(
-            "§eUsage unique §7(une seule fois par joueur)",
-            false
-        );
-        
+
+        $form->setTitle("§aAjouter une commande");
+        $form->addLabel("§7Executee quand un joueur interagit avec le NPC.\n§8Placeholders: {player} {x} {y} {z} {world} {xuid} {uuid}");
+        $form->addInput("§eCommande §7(sans le /)", "gamemode creative {player}", "");
+        $form->addDropdown("§eExecutee par", ["§eJoueur", "§cConsole"], 1);
+        $form->addInput("§eCooldown (secondes)", "0", "0");
+        $form->addInput("§ePermission requise (optionnel)", "customnpc.use", "");
+        $form->addToggle("§eUsage unique par joueur", false);
+
         $player->sendForm($form);
     }
-    
-    private function openCommandList(Player $player, string $uuid): void {
+
+    private function openList(Player $player, string $uuid): void {
         $data = $this->npcManager->getNPCData($uuid);
-        $commands = $data["commands"] ?? [];
-        
+        if($data === null) return;
+
+        $commands = $this->normalize($data["commands"] ?? []);
+
         if(empty($commands)) {
-            $player->sendMessage("§cAucune commande configurée pour ce NPC !");
+            $player->sendMessage("§cAucune commande configuree.");
             $this->open($player, $uuid);
             return;
         }
-        
-        $form = new SimpleForm(function(Player $player, $buttonIndex) use ($uuid, $commands) {
-            if($buttonIndex === null) {
+
+        $form = new SimpleForm(function(Player $player, $index) use ($uuid, $commands) {
+            if($index === null || $index === count($commands)) {
                 $this->open($player, $uuid);
                 return;
             }
-            
-            if($buttonIndex === count($commands)) {
-                $this->open($player, $uuid);
-                return;
-            }
-            
-            $this->openCommandEdit($player, $uuid, $buttonIndex);
+
+            $this->openEdit($player, $uuid, (string)$commands[$index]["id"]);
         });
-        
-        $form->setTitle("§eListe des Commandes");
-        
-        $content = "§7Clique sur une commande pour la modifier\n";
-        $content .= "§8━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
-        $content .= "§7Total: §b" . count($commands) . " commande(s)";
-        
-        $form->setContent($content);
-        
-        foreach($commands as $index => $cmd) {
-            $executor = $cmd["executor"] === "player" ? "§eJoueur" : "§c=Console";
-            $cooldown = $cmd["cooldown"] > 0 ? " §8| §7CD: {$cmd["cooldown"]}s" : "";
-            $oneTime = $cmd["oneTime"] ? " §8| §6Une fois" : "";
-            
-            $form->addButton(
-                "§b/{$cmd["command"]}\n{$executor}{$cooldown}{$oneTime}",
-                0,
-                "textures/ui/book"
-            );
+
+        $form->setTitle("§eListe des commandes");
+        $form->setContent("§7Total: §b" . count($commands));
+
+        foreach($commands as $entry) {
+            $executor = ($entry["executor"] ?? "console") === "player" ? "§eJoueur" : "§cConsole";
+            $cooldown = ($entry["cooldown"] ?? 0) > 0 ? " §8| §7CD " . $entry["cooldown"] . "s" : "";
+            $once = ($entry["oneTime"] ?? false) ? " §8| §6unique" : "";
+
+            $form->addButton("§b/" . $entry["command"] . "\n" . $executor . $cooldown . $once, 0, "textures/ui/book");
         }
-        
-        $form->addButton("§c« Retour", 0, "textures/ui/cancel");
-        
+
+        $form->addButton("§cRetour", 0, "textures/ui/cancel");
         $player->sendForm($form);
     }
-    
-    private function openCommandEdit(Player $player, string $uuid, int $commandIndex): void {
+
+    private function openEdit(Player $player, string $uuid, string $commandId): void {
         $data = $this->npcManager->getNPCData($uuid);
-        $commands = $data["commands"] ?? [];
-        
-        if(!isset($commands[$commandIndex])) {
-            $player->sendMessage("§cCommande introuvable !");
-            $this->openCommandList($player, $uuid);
+        if($data === null) return;
+
+        $commands = $this->normalize($data["commands"] ?? []);
+        $entry = null;
+
+        foreach($commands as $candidate) {
+            if((string)$candidate["id"] === $commandId) {
+                $entry = $candidate;
+                break;
+            }
+        }
+
+        if($entry === null) {
+            $this->openList($player, $uuid);
             return;
         }
-        
-        $cmd = $commands[$commandIndex];
-        
-        $form = new SimpleForm(function(Player $player, $buttonIndex) use ($uuid, $commandIndex) {
-            if($buttonIndex === null) {
-                $this->openCommandList($player, $uuid);
+
+        $form = new SimpleForm(function(Player $player, $index) use ($uuid, $commandId) {
+            if($index === null || $index === 1) {
+                $this->openList($player, $uuid);
                 return;
             }
-            
-            switch($buttonIndex) {
-                case 0:
-                    $this->deleteCommand($player, $uuid, $commandIndex);
-                    break;
-                case 1:
-                    $this->openCommandList($player, $uuid);
-                    break;
+
+            if($index === 0) {
+                $this->delete($player, $uuid, $commandId);
             }
         });
-        
-        $form->setTitle("§eÉditer la Commande");
-        
-        $executor = $cmd["executor"] === "player" ? "§eJoueur" : "§cConsole";
-        
-        $content = "§b/{$cmd["command"]}\n";
-        $content .= "§8━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
-        $content .= "§7Exécuteur: {$executor}\n";
-        
-        if($cmd["cooldown"] > 0) {
-            $content .= "§7Cooldown: §b{$cmd["cooldown"]}s\n";
+
+        $content = "§b/" . $entry["command"] . "\n";
+        $content .= "§7Executeur: " . (($entry["executor"] ?? "console") === "player" ? "§eJoueur" : "§cConsole") . "\n";
+
+        if(($entry["cooldown"] ?? 0) > 0) {
+            $content .= "§7Cooldown: §b" . $entry["cooldown"] . "s\n";
         }
-        
-        if(!empty($cmd["permission"])) {
-            $content .= "§7Permission: §b{$cmd["permission"]}\n";
+        if(!empty($entry["permission"])) {
+            $content .= "§7Permission: §b" . $entry["permission"] . "\n";
         }
-        
-        if($cmd["oneTime"]) {
-            $content .= "§7Usage: §6Une seule fois par joueur\n";
+        if($entry["oneTime"] ?? false) {
+            $content .= "§7Usage: §6une seule fois par joueur\n";
         }
-        
+
+        $form->setTitle("§eEditer la commande");
         $form->setContent($content);
-        $form->addButton("§cSupprimer cette commande", 0, "textures/ui/trash_default");
-        $form->addButton("§eRetour à la liste", 0, "textures/ui/cancel");
-        
+        $form->addButton("§cSupprimer", 0, "textures/ui/trash_default");
+        $form->addButton("§eRetour", 0, "textures/ui/cancel");
+
         $player->sendForm($form);
     }
-    
-    private function deleteCommand(Player $player, string $uuid, int $commandIndex): void {
+
+    private function delete(Player $player, string $uuid, string $commandId): void {
         $data = $this->npcManager->getNPCData($uuid);
-        $commands = $data["commands"] ?? [];
-        
-        if(!isset($commands[$commandIndex])) {
-            $player->sendMessage("§cCommande introuvable !");
-            $this->openCommandList($player, $uuid);
-            return;
+        if($data === null) return;
+
+        $commands = [];
+        $removed = null;
+
+        foreach($this->normalize($data["commands"] ?? []) as $entry) {
+            if((string)$entry["id"] === $commandId) {
+                $removed = $entry;
+                continue;
+            }
+            $commands[] = $entry;
         }
-        
-        $deletedCommand = $commands[$commandIndex]["command"];
-        unset($commands[$commandIndex]);
-        $commands = array_values($commands);
-        
-        $this->npcManager->updateNPCData($uuid, ["commands" => $commands]);
+
+        $usedOnce = array_values(array_filter(
+            $data["usedOnce"] ?? [],
+            fn($key) => !str_ends_with((string)$key, "|" . $commandId)
+        ));
+
+        $this->npcManager->updateNPCData($uuid, ["commands" => $commands, "usedOnce" => $usedOnce]);
         $this->npcManager->saveNPC($uuid);
-        
-        $player->sendMessage("§aCommande supprimée !");
-        $player->sendMessage("§7/{$deletedCommand}");
-        
-        $this->openCommandList($player, $uuid);
+
+        if($removed !== null) {
+            $player->sendMessage("§aCommande supprimee : §7/" . $removed["command"]);
+        }
+
+        $this->openList($player, $uuid);
+    }
+
+    private function resetUsage(Player $player, string $uuid): void {
+        $this->npcManager->updateNPCData($uuid, ["usedOnce" => []]);
+        $this->npcManager->saveNPC($uuid);
+
+        $player->sendMessage("§aUsages uniques reinitialises pour tous les joueurs.");
+        $this->open($player, $uuid);
     }
 }

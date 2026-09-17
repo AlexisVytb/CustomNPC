@@ -1,6 +1,3 @@
-# Configuration CustomNPC
-
-# Type de base de données: "sqlite" ou "mysql"
 database:
   type: "sqlite"
 
@@ -16,8 +13,24 @@ database:
 
 settings:
   auto-save-interval: 60
-  
   wand-detection-radius: 5.0
+  selection-radius: 8.0
+  max-npcs-per-world: 0
+  admin-mode-persistent: false
+  interact-cooldown: 1
+
+behavior:
+  aggro-radius: 15.0
+  deaggro-distance: 20.0
+  attack-range: 2.5
+  follow-distance: 1.5
+  look-radius: 8.0
+  ignore-creative: true
+  ignore-spectator: true
+
+logs:
+  enabled: true
+  retention-days: 30
 
 debug:
   enabled: false

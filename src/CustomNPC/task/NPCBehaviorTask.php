@@ -2,16 +2,18 @@
 
 namespace CustomNPC\task;
 
-use pocketmine\scheduler\Task;
-use pocketmine\entity\Living;
 use pocketmine\entity\Location;
-use pocketmine\math\Vector3;
+use pocketmine\entity\projectile\Arrow;
 use pocketmine\event\entity\EntityDamageByEntityEvent;
 use pocketmine\event\entity\EntityDamageEvent;
+use pocketmine\math\Vector3;
+use pocketmine\player\Player;
+use pocketmine\scheduler\Task;
+use pocketmine\world\sound\BowShootSound;
+use CustomNPC\Main;
+use CustomNPC\entity\NPCEntity;
 use CustomNPC\manager\NPCManager;
 use CustomNPC\utils\Constants;
-use pocketmine\entity\projectile\Arrow;
-use pocketmine\entity\projectile\Projectile;
 
 class NPCBehaviorTask extends Task {
 
@@ -22,164 +24,175 @@ class NPCBehaviorTask extends Task {
     }
 
     public function onRun(): void {
-        $npcData = $this->npcManager->getAllNPCData();
+        $plugin = Main::getInstance();
+        $config = $plugin->getConfig();
 
-        foreach($npcData as $uuid => $data) {
-            if($data["immobile"] ?? false) continue;
-            
-            if(!($data["aggressive"] ?? false)) continue;
-            if($data["immobile"] ?? false) continue;
+        $aggroRadius = (float)$config->getNested("behavior.aggro-radius", 15.0);
+        $deaggroDistance = (float)$config->getNested("behavior.deaggro-distance", 20.0);
+        $attackRange = (float)$config->getNested("behavior.attack-range", 2.5);
+        $followDistance = (float)$config->getNested("behavior.follow-distance", 1.5);
+        $lookRadius = (float)$config->getNested("behavior.look-radius", 8.0);
 
-            $world = \CustomNPC\Main::getInstance()->getServer()->getWorldManager()->getWorldByName($data["position"]["world"]);
-            if($world === null) continue;
+        foreach($this->npcManager->getAllNPCData() as $uuid => $data) {
+            if($data["stored"] ?? false) continue;
 
-            $npc = $world->getEntity($data["runtimeId"] ?? 0);
-            if($npc === null || !($npc instanceof Living)) continue;
+            $aggressive = (bool)($data["aggressive"] ?? false);
+            $lookAt = (bool)($data["lookAtPlayers"] ?? false);
+            if(!$aggressive && !$lookAt) continue;
 
-            $target = $this->findTarget($npc, $uuid, $data, $world);
+            $entity = $this->npcManager->getEntity($uuid);
+            if($entity === null || empty($entity->getViewers())) continue;
 
-            if($target !== null) {
-                $this->handleMovementAndAttack($npc, $target, $uuid, $data, $world);
+            if($aggressive && !($data["immobile"] ?? false)) {
+                $target = $this->findTarget($entity, $uuid, $aggroRadius, $deaggroDistance);
+
+                if($target !== null) {
+                    $this->handleCombat($entity, $target, $uuid, $data, $attackRange, $followDistance, $aggroRadius);
+                    continue;
+                }
             }
-        }
-    }
 
-    private function findTarget(Living $npc, string $uuid, array $data, $world): ?\pocketmine\player\Player {
-        $target = null;
-        $targetName = $this->npcManager->getTarget($uuid);
-        if($targetName !== null) {
-            $target = \CustomNPC\Main::getInstance()->getServer()->getPlayerExact($targetName);
-            if($target === null || $target->getWorld() !== $world || $npc->getPosition()->distance($target->getPosition()) > Constants::NPC_DEAGGRO_DISTANCE) {
-                $this->npcManager->setTarget($uuid, null);
-                $target = null;
-            }
-        }
-
-        if($target === null) {
-            $minDistance = Constants::NPC_AGGRO_RADIUS;
-            foreach($world->getPlayers() as $player) {
-                $distance = $npc->getPosition()->distance($player->getPosition());
-                if($distance < $minDistance) {
-                    $minDistance = $distance;
-                    $target = $player;
+            if($lookAt) {
+                $nearest = $this->findNearestViewer($entity, $lookRadius);
+                if($nearest !== null) {
+                    $entity->lookAt($nearest->getEyePos());
                 }
             }
         }
-
-        return $target;
     }
 
-    private function handleMovementAndAttack(Living $npc, $target, string $uuid, array $data, $world): void {
-        $distance = $npc->getPosition()->distance($target->getPosition());
+    private function isValidTarget(Player $player): bool {
+        $config = Main::getInstance()->getConfig();
 
-        if($distance > Constants::NPC_FOLLOW_DISTANCE) {
-            $this->moveTowardsTarget($npc, $target, $data, $world);
-        }
+        if(!$player->isAlive() || !$player->isConnected()) return false;
+        if($player->hasPermission("customnpc.ignored")) return false;
+        if((bool)$config->getNested("behavior.ignore-spectator", true) && $player->isSpectator()) return false;
+        if((bool)$config->getNested("behavior.ignore-creative", true) && $player->isCreative()) return false;
 
-        if($distance < Constants::NPC_ATTACK_RANGE && !($data["arrowAttack"] ?? false) && $this->npcManager->canAttack($uuid)) {
-            \CustomNPC\Main::getInstance()->debugLog("NPC '{$data['title']}' ({$uuid}) melee attacked player '{$target->getName()}' doing " . ($data["attackDamage"] ?? 1) . " damage");
-            $event = new EntityDamageByEntityEvent($npc, $target, EntityDamageEvent::CAUSE_ENTITY_ATTACK, $data["attackDamage"] ?? 1);
-            $target->attack($event);
+        return true;
+    }
 
-            if(!$event->isCancelled() && isset($data["effectOnHit"]) && $data["effectOnHit"] !== "") {
-                $this->applyEffectToPlayer($target, $data["effectOnHit"]);
+    private function findNearestViewer(NPCEntity $entity, float $radius): ?Player {
+        $best = null;
+        $bestDistance = $radius;
+
+        foreach($entity->getViewers() as $player) {
+            if(!$this->isValidTarget($player)) continue;
+
+            $distance = $entity->getPosition()->distance($player->getPosition());
+            if($distance < $bestDistance) {
+                $bestDistance = $distance;
+                $best = $player;
             }
         }
 
-        if(($data["arrowAttack"] ?? false) && $this->npcManager->canAttack($uuid)) {
-             if($distance <= Constants::NPC_AGGRO_RADIUS) {
-                 \CustomNPC\Main::getInstance()->debugLog("NPC '{$data['title']}' ({$uuid}) shot arrow at player '{$target->getName()}'");
-                 $this->shootArrow($npc, $target, $data);
-             }
+        return $best;
+    }
+
+    private function findTarget(NPCEntity $entity, string $uuid, float $aggroRadius, float $deaggroDistance): ?Player {
+        $targetName = $this->npcManager->getTarget($uuid);
+
+        if($targetName !== null) {
+            $target = Main::getInstance()->getServer()->getPlayerExact($targetName);
+
+            if($target !== null
+                && $this->isValidTarget($target)
+                && $target->getWorld() === $entity->getWorld()
+                && $entity->getPosition()->distance($target->getPosition()) <= $deaggroDistance) {
+                return $target;
+            }
+
+            $this->npcManager->setTarget($uuid, null);
+        }
+
+        return $this->findNearestViewer($entity, $aggroRadius);
+    }
+
+    private function handleCombat(NPCEntity $entity, Player $target, string $uuid, array $data, float $attackRange, float $followDistance, float $aggroRadius): void {
+        $distance = $entity->getPosition()->distance($target->getPosition());
+        $entity->lookAt($target->getEyePos());
+
+        $arrowAttack = (bool)($data["arrowAttack"] ?? false);
+
+        if($arrowAttack) {
+            if($distance <= $aggroRadius && $this->npcManager->canAttack($uuid)) {
+                $this->shootArrow($entity, $target, $data);
+            }
+            if($distance > $aggroRadius * 0.6) {
+                $this->moveTowards($entity, $target, $data);
+            }
+            return;
+        }
+
+        if($distance > $followDistance) {
+            $this->moveTowards($entity, $target, $data);
+        }
+
+        if($distance <= $attackRange && $this->npcManager->canAttack($uuid)) {
+            $damage = (float)($data["attackDamage"] ?? 1);
+            $event = new EntityDamageByEntityEvent($entity, $target, EntityDamageEvent::CAUSE_ENTITY_ATTACK, $damage);
+            $target->attack($event);
         }
     }
 
-    private function shootArrow(Living $npc, $target, array $data): void {
-        $sourcePos = $npc->getPosition()->add(0, $npc->getEyeHeight(), 0);
-        $targetPos = $target->getPosition()->add(0, $target->getEyeHeight(), 0);
-        
-        $direction = $targetPos->subtractVector($sourcePos)->normalize();
-        $speed = ($data["arrowSpeed"] ?? 1.0) * 0.8;
-        
-        $location = Location::fromObject($sourcePos, $npc->getWorld(), 
+    private function shootArrow(NPCEntity $entity, Player $target, array $data): void {
+        $source = $entity->getPosition()->add(0, $entity->getEyeHeight(), 0);
+        $destination = $target->getPosition()->add(0, $target->getEyeHeight(), 0);
+
+        $direction = $destination->subtractVector($source);
+        if($direction->lengthSquared() < 0.0001) return;
+        $direction = $direction->normalize();
+
+        $speed = max(0.5, (float)($data["arrowSpeed"] ?? 1)) * 0.9;
+
+        $location = Location::fromObject(
+            $source,
+            $entity->getWorld(),
             (atan2($direction->z, $direction->x) * 180 / M_PI) - 90,
             -atan2($direction->y, sqrt($direction->x ** 2 + $direction->z ** 2)) * 180 / M_PI
         );
-        
-        $arrow = new Arrow($location, $npc, ($data["critical"] ?? false));
-        $arrow->setMotion($direction->multiply($speed));
 
-        $arrow->setBaseDamage($data["attackDamage"] ?? 2.0);
-        
+        $arrow = new Arrow($location, $entity, false);
+        $arrow->setMotion($direction->multiply($speed));
+        $arrow->setBaseDamage((float)($data["attackDamage"] ?? 2));
         $arrow->spawnToAll();
-        $npc->getWorld()->addSound($sourcePos, new \pocketmine\world\sound\BowShootSound());
+
+        $entity->getWorld()->addSound($source, new BowShootSound());
     }
 
-    private function moveTowardsTarget(Living $npc, $target, array $data, $world): void {
-        $speed = ($data["speed"] ?? 1) * 0.15;
-        
-        $dirX = $target->getPosition()->x - $npc->getPosition()->x;
-        $dirZ = $target->getPosition()->z - $npc->getPosition()->z;
+    private function moveTowards(NPCEntity $entity, Player $target, array $data): void {
+        $world = $entity->getWorld();
+        $position = $entity->getPosition();
+
+        $dirX = $target->getPosition()->x - $position->x;
+        $dirZ = $target->getPosition()->z - $position->z;
         $length = sqrt($dirX * $dirX + $dirZ * $dirZ);
-        
-        if($length <= 0) return;
-        
+        if($length < 0.0001) return;
+
         $dirX /= $length;
         $dirZ /= $length;
-        
+
+        $speed = max(1, (int)($data["speed"] ?? 1)) * 0.12;
+
+        $newX = $position->x + $dirX * $speed;
+        $newZ = $position->z + $dirZ * $speed;
+        $newY = $position->y;
+
+        $front = $world->getBlockAt((int)floor($newX), (int)floor($newY), (int)floor($newZ));
+        $above = $world->getBlockAt((int)floor($newX), (int)floor($newY) + 1, (int)floor($newZ));
+        $below = $world->getBlockAt((int)floor($newX), (int)floor($newY) - 1, (int)floor($newZ));
+
+        if($front->isSolid()) {
+            if($above->isSolid()) {
+                $entity->setMotion(new Vector3(0, 0, 0));
+                return;
+            }
+            $newY += 1.0;
+        } elseif(!$below->isSolid()) {
+            $newY -= 0.35;
+        }
+
         $yaw = atan2($dirZ, $dirX) * 180 / M_PI - 90;
-        
-        $newX = $npc->getPosition()->x + ($dirX * $speed);
-        $newY = $npc->getPosition()->y;
-        $newZ = $npc->getPosition()->z + ($dirZ * $speed);
-
-        $blockInFront = $world->getBlockAt((int)$newX, (int)$newY, (int)$newZ);
-        $blockAbove = $world->getBlockAt((int)$newX, (int)($newY + 1), (int)$newZ);
-        $blockBelow = $world->getBlockAt((int)$newX, (int)($newY - 1), (int)$newZ);
-        
-        $canMove = true;
-        $shouldJump = false;
-        
-        if($blockInFront->isSolid()) {
-            if(!$blockAbove->isSolid()) {
-                $shouldJump = true;
-            } else {
-                $canMove = false;
-
-                $sideX = $npc->getPosition()->x + ($dirZ * $speed);
-                $sideZ = $npc->getPosition()->z - ($dirX * $speed);
-                $blockSide = $world->getBlockAt((int)$sideX, (int)$newY, (int)$sideZ);
-                if(!$blockSide->isSolid()) {
-                    $newX = $sideX;
-                    $newZ = $sideZ;
-                    $canMove = true;
-                }
-            }
-        }
-        
-        if($shouldJump) {
-            $npc->setMotion(new Vector3($dirX * $speed, 0.42, $dirZ * $speed));
-        } elseif($canMove) {
-            if(!$blockBelow->isSolid()) {
-                $newY -= 0.5;
-            }
-            $npc->teleport(new Location($newX, $newY, $newZ, $world, $yaw, 0));
-        }
-    }
-
-    private function applyEffectToPlayer($player, string $effectId): void {
-        if(!($player instanceof \pocketmine\player\Player)) return;
-        
-        $parts = explode(":", $effectId);
-        $effectName = $parts[0];
-        $durationSeconds = isset($parts[1]) ? (int)$parts[1] : 5;
-        $amplifier = isset($parts[2]) ? (int)$parts[2] : 0;
-        
-        $durationTicks = $durationSeconds * 20;
-
-        $effect = \pocketmine\entity\effect\StringToEffectParser::getInstance()->parse($effectName);
-        if($effect !== null) {
-            $player->getEffects()->add(new \pocketmine\entity\effect\EffectInstance($effect, $durationTicks, $amplifier));
-        }
+        $entity->moveTo(new Vector3($newX, $newY, $newZ), $yaw);
     }
 }

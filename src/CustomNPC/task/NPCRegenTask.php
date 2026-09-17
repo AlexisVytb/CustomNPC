@@ -3,7 +3,6 @@
 namespace CustomNPC\task;
 
 use pocketmine\scheduler\Task;
-use pocketmine\entity\Living;
 use CustomNPC\manager\NPCManager;
 
 class NPCRegenTask extends Task {
@@ -15,28 +14,23 @@ class NPCRegenTask extends Task {
     }
 
     public function onRun(): void {
-        $npcData = $this->npcManager->getAllNPCData();
-
-        foreach($npcData as $uuid => $data) {
+        foreach($this->npcManager->getAllNPCData() as $uuid => $data) {
             if(!($data["canRegen"] ?? false)) continue;
 
-            $world = \CustomNPC\Main::getInstance()->getServer()->getWorldManager()->getWorldByName($data["position"]["world"]);
-            if($world === null) continue;
+            $entity = $this->npcManager->getEntity($uuid);
+            if($entity === null || !$entity->isAlive()) continue;
 
-            $npc = $world->getEntity($data["runtimeId"] ?? 0);
-            if($npc === null || !($npc instanceof Living)) continue;
+            $maxHealth = $entity->getMaxHealth();
+            $current = $entity->getHealth();
+            if($current >= $maxHealth) continue;
 
-            $currentHealth = $npc->getHealth();
-            $maxHealth = $data["maxHealth"] ?? 100;
-            $regenAmount = ($data["regenAmount"] ?? 1) * 2;
+            $amount = max(1, (int)($data["regenAmount"] ?? 1));
+            $entity->setHealth(min($maxHealth, $current + $amount));
 
-            if($currentHealth < $maxHealth) {
-                $newHealth = min($maxHealth, $currentHealth + $regenAmount);
-                $npc->setHealth($newHealth);
-                
-                if($data["aggressive"] ?? false) {
-                    $this->npcManager->updateNameTag($npc, $uuid);
-                }
+            $this->npcManager->updateNPCData($uuid, ["health" => $entity->getHealth()]);
+
+            if($data["aggressive"] ?? false) {
+                $this->npcManager->updateNameTag($uuid);
             }
         }
     }

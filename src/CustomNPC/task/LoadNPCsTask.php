@@ -18,33 +18,24 @@ class LoadNPCsTask extends Task {
 
     public function onRun(): void {
         $count = 0;
-        
-        foreach($this->npcManager->getAllNPCData() as $uuid => $npcInfo) {
-            $pos = $npcInfo["position"];
-            $world = $this->plugin->getServer()->getWorldManager()->getWorldByName($pos["world"]);
-            
-            if($world === null) {
-                $this->plugin->getLogger()->warning("World " . $pos["world"] . " not found for NPC " . $uuid);
-                continue;
-            }
 
-            $bb = new \pocketmine\math\AxisAlignedBB(
-                $pos["x"] - 1, $pos["y"] - 1, $pos["z"] - 1,
-                $pos["x"] + 1, $pos["y"] + 1, $pos["z"] + 1
-            );
-            $nearbyEntities = $world->getNearbyEntities($bb);
-            
-            foreach($nearbyEntities as $entity) {
-                if($entity instanceof \pocketmine\entity\Human) {
-                    $this->plugin->getLogger()->warning("Despawning duplicate entity at NPC spawn location for '$uuid'");
-                    $entity->flagForDespawn();
-                }
-            }
-
-            $this->npcManager->spawnNPC($world, $uuid);
-            $count++;
+        foreach($this->plugin->getServer()->getWorldManager()->getWorlds() as $world) {
+            $count += $this->npcManager->spawnWorld($world);
         }
-        
-        $this->plugin->getLogger()->info("§a" . $count . " NPCs chargés !");
+
+        $missing = [];
+        foreach($this->npcManager->getAllNPCData() as $uuid => $data) {
+            $worldName = (string)($data["position"]["world"] ?? "");
+            if($worldName === "") continue;
+            if($this->plugin->getServer()->getWorldManager()->getWorldByName($worldName) === null) {
+                $missing[$worldName] = true;
+            }
+        }
+
+        foreach(array_keys($missing) as $worldName) {
+            $this->plugin->getLogger()->warning("Monde non charge : " . $worldName . " (NPCs en attente)");
+        }
+
+        $this->plugin->getLogger()->info($count . " NPCs spawnes");
     }
 }

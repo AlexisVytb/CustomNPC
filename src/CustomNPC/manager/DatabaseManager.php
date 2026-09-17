@@ -7,7 +7,7 @@ use CustomNPC\Main;
 class DatabaseManager {
 
     private Main $plugin;
-    private ?object $database = null;
+    private $database = null;
     private string $type;
 
     public function __construct(Main $plugin) {
@@ -17,17 +17,12 @@ class DatabaseManager {
     }
 
     private function loadConfig(): void {
-        $this->plugin->saveDefaultConfig();
-        $config = $this->plugin->getConfig();
-        
-        $this->type = strtolower($config->get("database")["type"] ?? "sqlite");
-        
-        if(!in_array($this->type, ["sqlite", "mysql"])) {
-            $this->plugin->getLogger()->warning("Type de BDD invalide: {$this->type}, utilisation de SQLite");
+        $this->type = strtolower((string)$this->plugin->getConfig()->getNested("database.type", "sqlite"));
+
+        if(!in_array($this->type, ["sqlite", "mysql"], true)) {
+            $this->plugin->getLogger()->warning("Type de base de donnees invalide, utilisation de SQLite");
             $this->type = "sqlite";
         }
-        
-        $this->plugin->getLogger()->info("Utilisation de la base de données: " . strtoupper($this->type));
     }
 
     private function initDatabase(): void {
@@ -39,407 +34,344 @@ class DatabaseManager {
     }
 
     private function initSQLite(): void {
-        $config = $this->plugin->getConfig()->get("database");
-        $file = $config["sqlite"]["file"] ?? "npcs.db";
-        
+        $file = (string)$this->plugin->getConfig()->getNested("database.sqlite.file", "npcs.db");
         $this->database = new \SQLite3($this->plugin->getDataFolder() . $file);
-        
+        $this->database->enableExceptions(false);
+
+        $legacy = $this->sqliteHasColumn("npcs", "title") && !$this->sqliteHasColumn("npcs", "data");
+
+        $legacyRows = [];
+        if($legacy) {
+            $result = $this->database->query("SELECT * FROM npcs");
+            if($result !== false) {
+                while($row = $result->fetchArray(SQLITE3_ASSOC)) {
+                    $legacyRows[] = $row;
+                }
+            }
+            $this->database->exec("ALTER TABLE npcs RENAME TO npcs_legacy_backup");
+        }
+
         $this->database->exec("CREATE TABLE IF NOT EXISTS npcs (
             uuid TEXT PRIMARY KEY,
-            title TEXT,
-            subtitle TEXT,
-            pos_x REAL,
-            pos_y REAL,
-            pos_z REAL,
+            custom_id TEXT,
             world TEXT,
-            yaw REAL,
-            pitch REAL,
-            health REAL,
-            max_health REAL,
-            speed INTEGER,
-            aggressive INTEGER,
-            attack_speed INTEGER,
-            attack_damage INTEGER,
-            arrow_attack INTEGER,
-            arrow_speed INTEGER,
-            effect_on_hit TEXT,
-            can_regen INTEGER,
-            regen_amount INTEGER,
-            size REAL,
-            skin TEXT,
-            saved_skin TEXT,
-            immobile INTEGER,
-            auto_respawn INTEGER,
-            can_be_hit INTEGER,
-            command_enabled INTEGER,
-            commands TEXT,
-            drops TEXT,
-            armor_helmet TEXT,
-            armor_chestplate TEXT,
-            armor_leggings TEXT,
-            armor_boots TEXT,
-            armor_hand TEXT,
-            creator TEXT
+            data TEXT
         )");
+        $this->database->exec("CREATE INDEX IF NOT EXISTS idx_npcs_world ON npcs(world)");
+        $this->database->exec("CREATE INDEX IF NOT EXISTS idx_npcs_custom ON npcs(custom_id)");
 
-        try {
-            $this->database->exec("ALTER TABLE npcs ADD COLUMN command_enabled INTEGER DEFAULT 0");
-        } catch(\Exception $e) {
-        }
-        
-        try {
-            $this->database->exec("ALTER TABLE npcs ADD COLUMN saved_skin TEXT");
-        } catch(\Exception $e) {
+        if($legacy) {
+            foreach($legacyRows as $row) {
+                $data = LegacyConverter::convert($row);
+                $this->saveNPC((string)$row["uuid"], $data);
+            }
+            $this->plugin->getLogger()->info("Migration terminee : " . count($legacyRows) . " NPCs convertis (ancienne table conservee sous npcs_legacy_backup)");
         }
 
-        try {
-            $this->database->exec("ALTER TABLE npcs ADD COLUMN creator TEXT DEFAULT ''");
-        } catch(\Exception $e) {
+        $this->plugin->getLogger()->info("SQLite initialise");
+    }
+
+    private function sqliteHasColumn(string $table, string $column): bool {
+        $result = @$this->database->query("PRAGMA table_info(" . $table . ")");
+        if($result === false) return false;
+
+        while($row = $result->fetchArray(SQLITE3_ASSOC)) {
+            if(($row["name"] ?? "") === $column) return true;
         }
-        
-        $this->plugin->getLogger()->info("SQLite initialisé avec succès");
+        return false;
     }
 
     private function initMySQL(): void {
-        $config = $this->plugin->getConfig()->get("database")["mysql"];
-        
-        $host = $config["host"] ?? "localhost";
-        $port = $config["port"] ?? 3306;
-        $username = $config["username"] ?? "root";
-        $password = $config["password"] ?? "";
-        $database = $config["database"] ?? "customnpc";
-        
+        $host = (string)$this->plugin->getConfig()->getNested("database.mysql.host", "localhost");
+        $port = (int)$this->plugin->getConfig()->getNested("database.mysql.port", 3306);
+        $username = (string)$this->plugin->getConfig()->getNested("database.mysql.username", "root");
+        $password = (string)$this->plugin->getConfig()->getNested("database.mysql.password", "");
+        $database = (string)$this->plugin->getConfig()->getNested("database.mysql.database", "customnpc");
+
         try {
-            $this->database = new \mysqli($host, $username, $password, $database, $port);
-            
-            if($this->database->connect_error) {
-                throw new \Exception("Erreur de connexion MySQL: " . $this->database->connect_error);
+            $connection = @new \mysqli($host, $username, $password, $database, $port);
+
+            if($connection->connect_error) {
+                throw new \RuntimeException($connection->connect_error);
             }
-            
+
+            $this->database = $connection;
             $this->database->set_charset("utf8mb4");
-            
-            $query = "CREATE TABLE IF NOT EXISTS npcs (
-                uuid VARCHAR(255) PRIMARY KEY,
-                title TEXT,
-                subtitle TEXT,
-                pos_x DOUBLE,
-                pos_y DOUBLE,
-                pos_z DOUBLE,
+
+            $legacy = $this->mysqlHasColumn("npcs", "title") && !$this->mysqlHasColumn("npcs", "data");
+            $legacyRows = [];
+
+            if($legacy) {
+                $result = $this->database->query("SELECT * FROM npcs");
+                if($result !== false) {
+                    while($row = $result->fetch_assoc()) {
+                        $legacyRows[] = $row;
+                    }
+                }
+                $this->database->query("RENAME TABLE npcs TO npcs_legacy_backup");
+            }
+
+            $this->database->query("CREATE TABLE IF NOT EXISTS npcs (
+                uuid VARCHAR(64) PRIMARY KEY,
+                custom_id VARCHAR(64),
                 world VARCHAR(255),
-                yaw FLOAT,
-                pitch FLOAT,
-                health DOUBLE,
-                max_health DOUBLE,
-                speed INT,
-                aggressive TINYINT(1),
-                attack_speed INT,
-                attack_damage INT,
-                arrow_attack TINYINT(1),
-                arrow_speed INT,
-                effect_on_hit TEXT,
-                can_regen TINYINT(1),
-                regen_amount INT,
-                size FLOAT,
-                skin TEXT,
-                saved_skin TEXT,
-                immobile TINYINT(1),
-                auto_respawn TINYINT(1),
-                can_be_hit TINYINT(1),
-                command_enabled TINYINT(1) DEFAULT 0,
-                commands TEXT,
-                drops TEXT,
-                armor_helmet VARCHAR(255),
-                armor_chestplate VARCHAR(255),
-                armor_leggings VARCHAR(255),
-                armor_boots VARCHAR(255),
-                armor_hand VARCHAR(255),
-                creator VARCHAR(255) DEFAULT ''
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
-            
-            $this->database->query($query);
-            
-            $this->database->query("ALTER TABLE npcs ADD COLUMN command_enabled TINYINT(1) DEFAULT 0");
-            $this->database->query("ALTER TABLE npcs ADD COLUMN saved_skin TEXT");
-            $this->database->query("ALTER TABLE npcs ADD COLUMN creator VARCHAR(255) DEFAULT ''");
-            
-            $this->plugin->getLogger()->info("MySQL connecté avec succès à {$host}:{$port}/{$database}");
-            
-        } catch(\Exception $e) {
-            $this->plugin->getLogger()->error("Impossible de se connecter à MySQL: " . $e->getMessage());
-            $this->plugin->getLogger()->warning("Basculement vers SQLite...");
+                data LONGTEXT,
+                INDEX idx_world (world),
+                INDEX idx_custom (custom_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+            if($legacy) {
+                foreach($legacyRows as $row) {
+                    $this->saveNPC((string)$row["uuid"], LegacyConverter::convert($row));
+                }
+                $this->plugin->getLogger()->info("Migration terminee : " . count($legacyRows) . " NPCs convertis");
+            }
+
+            $this->plugin->getLogger()->info("MySQL connecte a {$host}:{$port}/{$database}");
+        } catch(\Throwable $e) {
+            $this->plugin->getLogger()->error("Connexion MySQL impossible : " . $e->getMessage());
+            $this->plugin->getLogger()->warning("Basculement vers SQLite");
             $this->type = "sqlite";
             $this->initSQLite();
         }
     }
 
+    private function mysqlHasColumn(string $table, string $column): bool {
+        $result = @$this->database->query("SHOW COLUMNS FROM `" . $table . "` LIKE '" . $this->database->real_escape_string($column) . "'");
+        if($result === false) return false;
+        return $result->num_rows > 0;
+    }
+
     public function loadAllNPCs(): array {
+        $npcs = [];
+
         if($this->type === "sqlite") {
-            return $this->loadAllNPCsSQLite();
+            $result = $this->database->query("SELECT uuid, data FROM npcs");
+            if($result === false) return [];
+            while($row = $result->fetchArray(SQLITE3_ASSOC)) {
+                $decoded = json_decode((string)$row["data"], true);
+                if(is_array($decoded)) {
+                    $npcs[(string)$row["uuid"]] = $decoded;
+                }
+            }
         } else {
-            return $this->loadAllNPCsMySQL();
+            $result = $this->database->query("SELECT uuid, data FROM npcs");
+            if($result === false) return [];
+            while($row = $result->fetch_assoc()) {
+                $decoded = json_decode((string)$row["data"], true);
+                if(is_array($decoded)) {
+                    $npcs[(string)$row["uuid"]] = $decoded;
+                }
+            }
         }
-    }
 
-    private function loadAllNPCsSQLite(): array {
-        $result = $this->database->query("SELECT * FROM npcs");
-        $npcs = [];
-        
-        while($row = $result->fetchArray(SQLITE3_ASSOC)) {
-            $npcs[$row["uuid"]] = $this->parseNPCData($row);
-        }
-        
         return $npcs;
-    }
-
-    private function loadAllNPCsMySQL(): array {
-        $result = $this->database->query("SELECT * FROM npcs");
-        $npcs = [];
-        
-        while($row = $result->fetch_assoc()) {
-            $npcs[$row["uuid"]] = $this->parseNPCData($row);
-        }
-        
-        return $npcs;
-    }
-
-    private function parseNPCData(array $row): array {
-        return [
-            "title" => $row["title"],
-            "subtitle" => $row["subtitle"],
-            "position" => [
-                "x" => (float)$row["pos_x"],
-                "y" => (float)$row["pos_y"],
-                "z" => (float)$row["pos_z"],
-                "world" => $row["world"]
-            ],
-            "runtimeId" => 0,
-            "health" => (float)$row["health"],
-            "maxHealth" => (float)$row["max_health"],
-            "speed" => (int)$row["speed"],
-            "aggressive" => (bool)$row["aggressive"],
-            "attackSpeed" => (int)$row["attack_speed"],
-            "attackDamage" => (int)$row["attack_damage"],
-            "arrowAttack" => (bool)$row["arrow_attack"],
-            "arrowSpeed" => (int)$row["arrow_speed"],
-            "effectOnHit" => $row["effect_on_hit"],
-            "canRegen" => (bool)$row["can_regen"],
-            "regenAmount" => (int)$row["regen_amount"],
-            "size" => (float)$row["size"],
-            "entityType" => "human",
-            "skin" => $row["skin"],
-            "savedSkin" => json_decode($row["saved_skin"] ?? "null", true),
-            "immobile" => (bool)$row["immobile"],
-            "autoRespawn" => (bool)$row["auto_respawn"],
-            "canBeHit" => (bool)$row["can_be_hit"],
-            "commandEnabled" => (bool)($row["command_enabled"] ?? 0),
-            "commands" => json_decode($row["commands"] ?? "[]", true) ?: [],
-            "drops" => json_decode($row["drops"] ?? "[]", true) ?: [],
-            "armor" => [
-                "helmet" => $row["armor_helmet"] ?? "",
-                "chestplate" => $row["armor_chestplate"] ?? "",
-                "leggings" => $row["armor_leggings"] ?? "",
-                "boots" => $row["armor_boots"] ?? "",
-                "hand" => $row["armor_hand"] ?? ""
-            ],
-            "yaw" => (float)$row["yaw"],
-            "pitch" => (float)$row["pitch"],
-            "creator" => $row["creator"] ?? "",
-        ];
     }
 
     public function saveNPC(string $uuid, array $data): void {
-        $this->plugin->debugLog("Saving NPC '{$data['title']}' ({$uuid}) to database ({$this->type})");
+        unset($data["runtimeId"]);
+
+        $json = json_encode($data);
+        if($json === false) {
+            $this->plugin->getLogger()->error("Impossible de serialiser le NPC " . $uuid);
+            return;
+        }
+
+        $customId = (string)($data["customId"] ?? "");
+        $world = (string)($data["position"]["world"] ?? "");
+
         if($this->type === "sqlite") {
-            $this->saveNPCSQLite($uuid, $data);
+            $stmt = $this->database->prepare("INSERT OR REPLACE INTO npcs (uuid, custom_id, world, data) VALUES (:uuid, :custom_id, :world, :data)");
+            if($stmt === false) return;
+            $stmt->bindValue(":uuid", $uuid, SQLITE3_TEXT);
+            $stmt->bindValue(":custom_id", $customId, SQLITE3_TEXT);
+            $stmt->bindValue(":world", $world, SQLITE3_TEXT);
+            $stmt->bindValue(":data", $json, SQLITE3_TEXT);
+            $stmt->execute();
+            $stmt->close();
         } else {
-            $this->saveNPCMySQL($uuid, $data);
+            $stmt = $this->database->prepare("INSERT INTO npcs (uuid, custom_id, world, data) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE custom_id=VALUES(custom_id), world=VALUES(world), data=VALUES(data)");
+            if($stmt === false) return;
+            $stmt->bind_param("ssss", $uuid, $customId, $world, $json);
+            $stmt->execute();
+            $stmt->close();
         }
     }
 
-    private function saveNPCSQLite(string $uuid, array $data): void {
-        $pos = $data["position"];
-        
-        $stmt = $this->database->prepare("
-            INSERT OR REPLACE INTO npcs (
-                uuid, title, subtitle, pos_x, pos_y, pos_z, world, yaw, pitch,
-                health, max_health, speed, aggressive, attack_speed, attack_damage,
-                arrow_attack, arrow_speed, effect_on_hit, can_regen, regen_amount,
-                size, skin, saved_skin, immobile, auto_respawn, can_be_hit, command_enabled,
-                commands, drops, armor_helmet, armor_chestplate, armor_leggings,
-                armor_boots, armor_hand, creator
-            ) VALUES (
-                :uuid, :title, :subtitle, :pos_x, :pos_y, :pos_z, :world, :yaw, :pitch,
-                :health, :max_health, :speed, :aggressive, :attack_speed, :attack_damage,
-                :arrow_attack, :arrow_speed, :effect_on_hit, :can_regen, :regen_amount,
-                :size, :skin, :saved_skin, :immobile, :auto_respawn, :can_be_hit, :command_enabled,
-                :commands, :drops, :armor_helmet, :armor_chestplate, :armor_leggings,
-                :armor_boots, :armor_hand, :creator
-            )
-        ");
-        
-        $stmt->bindValue(":uuid", $uuid);
-        $stmt->bindValue(":title", $data["title"]);
-        $stmt->bindValue(":subtitle", $data["subtitle"]);
-        $stmt->bindValue(":pos_x", $pos["x"]);
-        $stmt->bindValue(":pos_y", $pos["y"]);
-        $stmt->bindValue(":pos_z", $pos["z"]);
-        $stmt->bindValue(":world", $pos["world"]);
-        $stmt->bindValue(":yaw", $data["yaw"] ?? 0.0);
-        $stmt->bindValue(":pitch", $data["pitch"] ?? 0.0);
-        $stmt->bindValue(":health", $data["health"]);
-        $stmt->bindValue(":max_health", $data["maxHealth"]);
-        $stmt->bindValue(":speed", $data["speed"]);
-        $stmt->bindValue(":aggressive", (int)$data["aggressive"]);
-        $stmt->bindValue(":attack_speed", $data["attackSpeed"]);
-        $stmt->bindValue(":attack_damage", $data["attackDamage"]);
-        $stmt->bindValue(":arrow_attack", (int)$data["arrowAttack"]);
-        $stmt->bindValue(":arrow_speed", $data["arrowSpeed"]);
-        $stmt->bindValue(":effect_on_hit", $data["effectOnHit"]);
-        $stmt->bindValue(":can_regen", (int)$data["canRegen"]);
-        $stmt->bindValue(":regen_amount", $data["regenAmount"]);
-        $stmt->bindValue(":size", $data["size"]);
-        $stmt->bindValue(":skin", $data["skin"]);
-        $stmt->bindValue(":saved_skin", isset($data["savedSkin"]) ? json_encode($data["savedSkin"]) : null);
-        $stmt->bindValue(":immobile", (int)$data["immobile"]);
-        $stmt->bindValue(":auto_respawn", (int)$data["autoRespawn"]);
-        $stmt->bindValue(":can_be_hit", (int)$data["canBeHit"]);
-        $stmt->bindValue(":command_enabled", (int)($data["commandEnabled"] ?? false));
-        $stmt->bindValue(":commands", json_encode($data["commands"] ?? []));
-        $stmt->bindValue(":drops", json_encode($data["drops"] ?? []));
-        $stmt->bindValue(":armor_helmet", $data["armor"]["helmet"] ?? "");
-        $stmt->bindValue(":armor_chestplate", $data["armor"]["chestplate"] ?? "");
-        $stmt->bindValue(":armor_leggings", $data["armor"]["leggings"] ?? "");
-        $stmt->bindValue(":armor_boots", $data["armor"]["boots"] ?? "");
-        $stmt->bindValue(":armor_hand", $data["armor"]["hand"] ?? "");
-        $stmt->bindValue(":creator", $data["creator"] ?? "");
-        
-        $stmt->execute();
+    public function saveBatch(array $npcs): void {
+        if(empty($npcs)) return;
+
+        $this->beginTransaction();
+        foreach($npcs as $uuid => $data) {
+            $this->saveNPC((string)$uuid, $data);
+        }
+        $this->commitTransaction();
     }
 
-    private function saveNPCMySQL(string $uuid, array $data): void {
-        $pos = $data["position"];
-        
-        $stmt = $this->database->prepare("
-            INSERT INTO npcs (
-                uuid, title, subtitle, pos_x, pos_y, pos_z, world, yaw, pitch,
-                health, max_health, speed, aggressive, attack_speed, attack_damage,
-                arrow_attack, arrow_speed, effect_on_hit, can_regen, regen_amount,
-                size, skin, saved_skin, immobile, auto_respawn, can_be_hit, command_enabled,
-                commands, drops, armor_helmet, armor_chestplate, armor_leggings,
-                armor_boots, armor_hand, creator
-            ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?,
-                ?, ?, ?
-            )
-            ON DUPLICATE KEY UPDATE
-                title=VALUES(title), subtitle=VALUES(subtitle),
-                pos_x=VALUES(pos_x), pos_y=VALUES(pos_y), pos_z=VALUES(pos_z),
-                world=VALUES(world), yaw=VALUES(yaw), pitch=VALUES(pitch),
-                health=VALUES(health), max_health=VALUES(max_health), speed=VALUES(speed),
-                aggressive=VALUES(aggressive), attack_speed=VALUES(attack_speed),
-                attack_damage=VALUES(attack_damage), arrow_attack=VALUES(arrow_attack),
-                arrow_speed=VALUES(arrow_speed), effect_on_hit=VALUES(effect_on_hit),
-                can_regen=VALUES(can_regen), regen_amount=VALUES(regen_amount),
-                size=VALUES(size), skin=VALUES(skin), saved_skin=VALUES(saved_skin), immobile=VALUES(immobile),
-                auto_respawn=VALUES(auto_respawn), can_be_hit=VALUES(can_be_hit),
-                command_enabled=VALUES(command_enabled), commands=VALUES(commands),
-                drops=VALUES(drops), armor_helmet=VALUES(armor_helmet),
-                armor_chestplate=VALUES(armor_chestplate), armor_leggings=VALUES(armor_leggings),
-                armor_boots=VALUES(armor_boots), armor_hand=VALUES(armor_hand),
-                creator=VALUES(creator)
-        ");
-        
-        $savedSkinJson = isset($data["savedSkin"]) ? json_encode($data["savedSkin"]) : null;
-        
-        $title = $data["title"];
-        $subtitle = $data["subtitle"];
-        $posX = $pos["x"];
-        $posY = $pos["y"];
-        $posZ = $pos["z"];
-        $worldName = $pos["world"];
-        $yaw = $data["yaw"];
-        $pitch = $data["pitch"];
-        $health = $data["health"];
-        $maxHealth = $data["maxHealth"];
-        $speed = $data["speed"];
-        $aggressive = (int)$data["aggressive"];
-        $attackSpeed = $data["attackSpeed"];
-        $attackDamage = $data["attackDamage"];
-        $arrowAttack = (int)$data["arrowAttack"];
-        $arrowSpeed = $data["arrowSpeed"];
-        $effectOnHit = $data["effectOnHit"];
-        $canRegen = (int)$data["canRegen"];
-        $regenAmount = $data["regenAmount"];
-        $size = $data["size"];
-        $skin = $data["skin"];
-        $immobile = (int)$data["immobile"];
-        $autoRespawn = (int)$data["autoRespawn"];
-        $canBeHit = (int)$data["canBeHit"];
-        $commandEnabled = (int)($data["commandEnabled"] ?? false);
-        $commands = json_encode($data["commands"] ?? []);
-        $drops = json_encode($data["drops"] ?? []);
-        $helmet = $data["armor"]["helmet"] ?? "";
-        $chestplate = $data["armor"]["chestplate"] ?? "";
-        $leggings = $data["armor"]["leggings"] ?? "";
-        $boots = $data["armor"]["boots"] ?? "";
-        $hand = $data["armor"]["hand"] ?? "";
-        $creator = $data["creator"] ?? "";
+    private function beginTransaction(): void {
+        if($this->type === "sqlite") {
+            $this->database->exec("BEGIN TRANSACTION");
+        } else {
+            $this->database->begin_transaction();
+        }
+    }
 
-        $stmt->bind_param(
-            "sssdddsddddiiiiiisiiidssiiiissssssss",
-            $uuid,
-            $title,
-            $subtitle,
-            $posX,
-            $posY,
-            $posZ,
-            $worldName,
-            $yaw,
-            $pitch,
-            $health,
-            $maxHealth,
-            $speed,
-            $aggressive,
-            $attackSpeed,
-            $attackDamage,
-            $arrowAttack,
-            $arrowSpeed,
-            $effectOnHit,
-            $canRegen,
-            $regenAmount,
-            $size,
-            $skin,
-            $savedSkinJson,
-            $immobile,
-            $autoRespawn,
-            $canBeHit,
-            $commandEnabled,
-            $commands,
-            $drops,
-            $helmet,
-            $chestplate,
-            $leggings,
-            $boots,
-            $hand,
-            $creator
-        );
-        
-        $stmt->execute();
-        $stmt->close();
+    private function commitTransaction(): void {
+        if($this->type === "sqlite") {
+            $this->database->exec("COMMIT");
+        } else {
+            $this->database->commit();
+        }
     }
 
     public function deleteNPC(string $uuid): void {
-        $this->plugin->debugLog("Deleting NPC '{$uuid}' from database ({$this->type})");
         if($this->type === "sqlite") {
             $stmt = $this->database->prepare("DELETE FROM npcs WHERE uuid = :uuid");
-            $stmt->bindValue(":uuid", $uuid);
+            if($stmt === false) return;
+            $stmt->bindValue(":uuid", $uuid, SQLITE3_TEXT);
             $stmt->execute();
+            $stmt->close();
         } else {
             $stmt = $this->database->prepare("DELETE FROM npcs WHERE uuid = ?");
+            if($stmt === false) return;
+            $stmt->bind_param("s", $uuid);
+            $stmt->execute();
+            $stmt->close();
+        }
+    }
+
+    public function initLogTable(): void {
+        if($this->type === "sqlite") {
+            $this->database->exec("CREATE TABLE IF NOT EXISTS npc_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                npc_uuid TEXT,
+                actor TEXT,
+                action TEXT,
+                details TEXT,
+                time INTEGER
+            )");
+            $this->database->exec("CREATE INDEX IF NOT EXISTS idx_logs_uuid ON npc_logs(npc_uuid)");
+            $this->database->exec("CREATE INDEX IF NOT EXISTS idx_logs_time ON npc_logs(time)");
+        } else {
+            $this->database->query("CREATE TABLE IF NOT EXISTS npc_logs (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                npc_uuid VARCHAR(64),
+                actor VARCHAR(64),
+                action VARCHAR(64),
+                details TEXT,
+                time BIGINT,
+                INDEX idx_logs_uuid (npc_uuid),
+                INDEX idx_logs_time (time)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        }
+    }
+
+    public function addLog(string $uuid, string $actor, string $action, string $details, int $time): void {
+        if($this->type === "sqlite") {
+            $stmt = $this->database->prepare("INSERT INTO npc_logs (npc_uuid, actor, action, details, time) VALUES (:uuid, :actor, :action, :details, :time)");
+            if($stmt === false) return;
+            $stmt->bindValue(":uuid", $uuid, SQLITE3_TEXT);
+            $stmt->bindValue(":actor", $actor, SQLITE3_TEXT);
+            $stmt->bindValue(":action", $action, SQLITE3_TEXT);
+            $stmt->bindValue(":details", $details, SQLITE3_TEXT);
+            $stmt->bindValue(":time", $time, SQLITE3_INTEGER);
+            $stmt->execute();
+            $stmt->close();
+        } else {
+            $stmt = $this->database->prepare("INSERT INTO npc_logs (npc_uuid, actor, action, details, time) VALUES (?, ?, ?, ?, ?)");
+            if($stmt === false) return;
+            $stmt->bind_param("ssssi", $uuid, $actor, $action, $details, $time);
+            $stmt->execute();
+            $stmt->close();
+        }
+    }
+
+    public function getLogs(?string $uuid, int $limit): array {
+        $logs = [];
+
+        if($this->type === "sqlite") {
+            if($uuid === null) {
+                $stmt = $this->database->prepare("SELECT npc_uuid, actor, action, details, time FROM npc_logs ORDER BY time DESC LIMIT :limit");
+            } else {
+                $stmt = $this->database->prepare("SELECT npc_uuid, actor, action, details, time FROM npc_logs WHERE npc_uuid = :uuid ORDER BY time DESC LIMIT :limit");
+            }
+
+            if($stmt === false) return [];
+
+            if($uuid !== null) {
+                $stmt->bindValue(":uuid", $uuid, SQLITE3_TEXT);
+            }
+            $stmt->bindValue(":limit", $limit, SQLITE3_INTEGER);
+
+            $result = $stmt->execute();
+            if($result !== false) {
+                while($row = $result->fetchArray(SQLITE3_ASSOC)) {
+                    $logs[] = $row;
+                }
+            }
+
+            $stmt->close();
+        } else {
+            if($uuid === null) {
+                $stmt = $this->database->prepare("SELECT npc_uuid, actor, action, details, time FROM npc_logs ORDER BY time DESC LIMIT ?");
+                if($stmt === false) return [];
+                $stmt->bind_param("i", $limit);
+            } else {
+                $stmt = $this->database->prepare("SELECT npc_uuid, actor, action, details, time FROM npc_logs WHERE npc_uuid = ? ORDER BY time DESC LIMIT ?");
+                if($stmt === false) return [];
+                $stmt->bind_param("si", $uuid, $limit);
+            }
+
+            $stmt->execute();
+            $result = $stmt->get_result();
+
+            if($result !== false) {
+                while($row = $result->fetch_assoc()) {
+                    $logs[] = $row;
+                }
+            }
+
+            $stmt->close();
+        }
+
+        return $logs;
+    }
+
+    public function pruneLogs(int $before): void {
+        if($this->type === "sqlite") {
+            $stmt = $this->database->prepare("DELETE FROM npc_logs WHERE time < :before");
+            if($stmt === false) return;
+            $stmt->bindValue(":before", $before, SQLITE3_INTEGER);
+            $stmt->execute();
+            $stmt->close();
+        } else {
+            $stmt = $this->database->prepare("DELETE FROM npc_logs WHERE time < ?");
+            if($stmt === false) return;
+            $stmt->bind_param("i", $before);
+            $stmt->execute();
+            $stmt->close();
+        }
+    }
+
+    public function clearLogs(?string $uuid): void {
+        if($uuid === null) {
+            if($this->type === "sqlite") {
+                $this->database->exec("DELETE FROM npc_logs");
+            } else {
+                $this->database->query("DELETE FROM npc_logs");
+            }
+            return;
+        }
+
+        if($this->type === "sqlite") {
+            $stmt = $this->database->prepare("DELETE FROM npc_logs WHERE npc_uuid = :uuid");
+            if($stmt === false) return;
+            $stmt->bindValue(":uuid", $uuid, SQLITE3_TEXT);
+            $stmt->execute();
+            $stmt->close();
+        } else {
+            $stmt = $this->database->prepare("DELETE FROM npc_logs WHERE npc_uuid = ?");
+            if($stmt === false) return;
             $stmt->bind_param("s", $uuid);
             $stmt->execute();
             $stmt->close();
@@ -448,11 +380,8 @@ class DatabaseManager {
 
     public function close(): void {
         if($this->database !== null) {
-            if($this->type === "sqlite") {
-                $this->database->close();
-            } else {
-                $this->database->close();
-            }
+            $this->database->close();
+            $this->database = null;
         }
     }
 

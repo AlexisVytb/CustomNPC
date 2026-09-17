@@ -2,8 +2,8 @@
 
 namespace CustomNPC\gui;
 
-use pocketmine\player\Player;
 use jojoe77777\FormAPI\CustomForm;
+use pocketmine\player\Player;
 use CustomNPC\manager\NPCManager;
 use CustomNPC\utils\Constants;
 
@@ -16,55 +16,55 @@ class FakePlayerGUI {
     }
 
     public function open(Player $player, ?string $uuid): void {
-        if($uuid === null) {
-            $player->sendMessage("§cAucun NPC sélectionné !");
-            return;
-        }
+        if($uuid === null) return;
 
         $data = $this->npcManager->getNPCData($uuid);
         if($data === null) {
-            $player->sendMessage("§cNPC introuvable !");
+            $player->sendMessage("§cNPC introuvable.");
             return;
         }
-        $name = $data["title"] ?? "Hub";
-        $faction = "";
 
-        $currentSubtitle = $data["subtitle"] ?? "";
-        $lines = explode("\n", $currentSubtitle);
-        if(count($lines) > 0) {
-            $faction = $lines[0];
+        $worlds = [];
+        foreach($player->getServer()->getWorldManager()->getWorlds() as $world) {
+            $worlds[] = $world->getFolderName();
         }
 
-        $form = new CustomForm(function(Player $player, $formData) use ($uuid) {
-            if($formData === null) return;
+        $form = new CustomForm(function(Player $player, $result) use ($uuid, $worlds) {
+            if($result === null) return;
 
-            $name = $formData[0];
-            $faction = $formData[1];
-            
-            $subtitle = $faction . "\n§a20 PV";
+            $title = trim((string)$result[1]);
+            $subtitle = trim((string)$result[2]);
+
+            if((bool)$result[3]) {
+                $counter = ((int)$result[4] === 0) ? "{online}" : "{world_players}";
+                $subtitle .= ($subtitle === "" ? "" : "\n") . "§a" . $counter . " joueur(s)";
+            }
 
             $updates = [
-                "title" => $name,
+                "title" => $title === "" ? "Hub" : $title,
                 "subtitle" => $subtitle,
-                "health" => 20.0,
-                "maxHealth" => 20.0,
                 "canBeHit" => false,
-                "immobile" => true
+                "immobile" => true,
+                "aggressive" => false,
+                "nametagMode" => Constants::NAMETAG_ALWAYS,
+                "lookAtPlayers" => (bool)$result[5]
             ];
 
             $this->npcManager->updateNPCData($uuid, $updates);
-            $this->npcManager->updateNPC($player->getWorld(), $uuid);
+            $this->npcManager->updateNPC($uuid);
             $this->npcManager->saveNPC($uuid);
-            
-            $player->sendMessage("§aNPC configuré en Fake Player !");
+
+            $player->sendMessage("§aFake player configure.");
             (new MainGUI($this->npcManager))->open($player, $uuid);
         });
 
-        $form->setTitle("§aFake Player Config");
-        $form->addLabel("§7Configure l'apparence type 'Fake Player'");
-        $form->addInput("Nom (Titre)", "Ex: PvP", $name);
-        $form->addInput("Faction (Sous-titre)", "Ex: 10 joueurs", $faction);
-        $form->addLabel("§eNote: 20 PV seront affichés automatiquement en dessous.");
+        $form->setTitle("§aFake Player");
+        $form->addLabel("§7Configure un NPC de type hub, non frappable et immobile.\n§7Le compteur de joueurs se met a jour tout seul.");
+        $form->addInput("Nom affiche", "Ex: PvP", (string)($data["title"] ?? "Hub"));
+        $form->addInput("Ligne secondaire", "Ex: Faction", explode("\n", (string)($data["subtitle"] ?? ""))[0] ?? "");
+        $form->addToggle("Afficher un compteur de joueurs", true);
+        $form->addDropdown("Portee du compteur", ["Serveur entier", "Monde du NPC"], 0);
+        $form->addToggle("Suit les joueurs du regard", (bool)($data["lookAtPlayers"] ?? false));
 
         $player->sendForm($form);
     }

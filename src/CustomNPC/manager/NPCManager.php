@@ -2,13 +2,19 @@
 
 namespace CustomNPC\manager;
 
-use pocketmine\entity\Human;
-use pocketmine\entity\Living;
 use pocketmine\entity\Location;
-use pocketmine\world\World;
+use pocketmine\entity\Living;
+use pocketmine\entity\Skin;
 use pocketmine\nbt\tag\CompoundTag;
-use pocketmine\scheduler\Task;
+use pocketmine\network\mcpe\protocol\SetActorDataPacket;
+use pocketmine\network\mcpe\protocol\types\entity\EntityMetadataProperties;
+use pocketmine\network\mcpe\protocol\types\entity\PropertySyncData;
+use pocketmine\network\mcpe\protocol\types\entity\StringMetadataProperty;
+use pocketmine\player\Player;
+use pocketmine\world\World;
 use CustomNPC\Main;
+use CustomNPC\entity\NPCEntity;
+use CustomNPC\utils\Constants;
 use CustomNPC\utils\ItemParser;
 
 class NPCManager {
@@ -16,18 +22,25 @@ class NPCManager {
     private Main $plugin;
     private DatabaseManager $database;
     private SkinManager $skinManager;
-    
+    private RaceManager $raceManager;
+    private ModelManager $modelManager;
+
     private array $npcData = [];
     private array $npcUuidByEntityId = [];
     private array $npcTargets = [];
     private array $npcLastAttack = [];
+    private array $dirty = [];
     private array $waitingForUuid = [];
     private array $adminPlayers = [];
+    private array $selection = [];
+    private array $clipboard = [];
 
     public function __construct(Main $plugin, DatabaseManager $database) {
         $this->plugin = $plugin;
         $this->database = $database;
         $this->skinManager = new SkinManager($plugin);
+        $this->raceManager = new RaceManager($plugin);
+        $this->modelManager = new ModelManager();
     }
 
     public function getPlugin(): Main {
@@ -38,29 +51,41 @@ class NPCManager {
         return $this->skinManager;
     }
 
+    public function getRaceManager(): RaceManager {
+        return $this->raceManager;
+    }
+
+    public function getModelManager(): ModelManager {
+        return $this->modelManager;
+    }
+
     public function loadFromDatabase(): void {
         $this->npcData = $this->database->loadAllNPCs();
-        
+
         foreach($this->npcData as $uuid => $data) {
+            $this->npcData[$uuid] = array_merge($this->getDefaultNPCData(0, 0, 0, ""), $data);
             $this->npcData[$uuid]["runtimeId"] = 0;
         }
-        
+
         $this->npcUuidByEntityId = [];
-        $this->plugin->getLogger()->info("§aChargé " . count($this->npcData) . " NPCs depuis la base de données");
-        $this->loadAdmins();
+        $this->plugin->getLogger()->info(count($this->npcData) . " NPCs charges depuis la base");
+
+        if((bool)$this->plugin->getConfig()->getNested("settings.admin-mode-persistent", false)) {
+            $this->loadAdmins();
+        }
     }
 
     private function loadAdmins(): void {
         $file = $this->plugin->getDataFolder() . "admins.json";
         if(file_exists($file)) {
-            $data = json_decode(file_get_contents($file), true);
-            $this->adminPlayers = is_array($data) ? $data : [];
+            $decoded = json_decode((string)file_get_contents($file), true);
+            $this->adminPlayers = is_array($decoded) ? $decoded : [];
         }
     }
 
     private function saveAdmins(): void {
-        $file = $this->plugin->getDataFolder() . "admins.json";
-        file_put_contents($file, json_encode($this->adminPlayers));
+        if(!(bool)$this->plugin->getConfig()->getNested("settings.admin-mode-persistent", false)) return;
+        file_put_contents($this->plugin->getDataFolder() . "admins.json", json_encode(array_values($this->adminPlayers)));
     }
 
     public function isAdmin(string $playerName): bool {
@@ -69,411 +94,451 @@ class NPCManager {
 
     public function setAdmin(string $playerName, bool $value): void {
         $key = strtolower($playerName);
+
         if($value) {
             if(!in_array($key, $this->adminPlayers, true)) {
                 $this->adminPlayers[] = $key;
             }
         } else {
-            $this->adminPlayers = array_values(array_filter($this->adminPlayers, fn($n) => $n !== $key));
+            $this->adminPlayers = array_values(array_filter($this->adminPlayers, fn($name) => $name !== $key));
         }
+
         $this->saveAdmins();
     }
 
-    public function refreshNPCsForPlayer(\pocketmine\player\Player $player): void {
-        $world = $player->getWorld();
+    public function select(Player $player, ?string $uuid): void {
+        if($uuid === null) {
+            unset($this->selection[$player->getName()]);
+        } else {
+            $this->selection[$player->getName()] = $uuid;
+        }
+    }
+
+    public function getSelection(Player $player): ?string {
+        $uuid = $this->selection[$player->getName()] ?? null;
+        return ($uuid !== null && isset($this->npcData[$uuid])) ? $uuid : null;
+    }
+
+    public function setClipboard(string $playerName, array $data): void {
+        $this->clipboard[$playerName] = $data;
+    }
+
+    public function getClipboard(string $playerName): ?array {
+        return $this->clipboard[$playerName] ?? null;
+    }
+
+    public function resolve(string $identifier): ?string {
+        if(isset($this->npcData[$identifier])) return $identifier;
+
+        $needle = strtolower($identifier);
         foreach($this->npcData as $uuid => $data) {
-            if($data["position"]["world"] !== $world->getFolderName()) continue;
-            $entityId = $data["runtimeId"] ?? 0;
-            if($entityId === 0) continue;
-            $entity = $world->getEntity($entityId);
-            if($entity === null || $entity->isClosed()) continue;
+            if(strtolower((string)($data["customId"] ?? "")) === $needle && $needle !== "") {
+                return $uuid;
+            }
+        }
 
-            $creator = $data["creator"] ?? "";
-            $baseTag = $this->buildNameTag($data, $entity instanceof \pocketmine\entity\Living ? $entity : null, $uuid);
+        return null;
+    }
 
-            if($this->isAdmin($player->getName()) && $creator !== "") {
-                $adminTag = $baseTag . "\n§l§cPlacer : §f" . $creator;
-            } else {
-                $adminTag = $baseTag;
+    public function customIdExists(string $customId, ?string $ignoreUuid = null): bool {
+        $needle = strtolower($customId);
+        foreach($this->npcData as $uuid => $data) {
+            if($uuid === $ignoreUuid) continue;
+            if(strtolower((string)($data["customId"] ?? "")) === $needle && $needle !== "") {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public function findNearest(Player $player, float $radius): ?string {
+        $best = null;
+        $bestDistance = $radius;
+        $world = $player->getWorld();
+
+        foreach($this->npcData as $uuid => $data) {
+            if(($data["position"]["world"] ?? "") !== $world->getFolderName()) continue;
+
+            $entity = $this->getEntity($uuid);
+            if($entity === null) continue;
+
+            $distance = $entity->getPosition()->distance($player->getPosition());
+            if($distance < $bestDistance) {
+                $bestDistance = $distance;
+                $best = $uuid;
+            }
+        }
+
+        return $best;
+    }
+
+    public function findLookedAt(Player $player, float $radius): ?string {
+        $eye = $player->getEyePos();
+        $direction = $player->getDirectionVector();
+
+        $best = null;
+        $bestScore = 0.94;
+
+        foreach($this->npcData as $uuid => $data) {
+            if(($data["position"]["world"] ?? "") !== $player->getWorld()->getFolderName()) continue;
+
+            $entity = $this->getEntity($uuid);
+            if($entity === null) continue;
+
+            $to = $entity->getPosition()->add(0, $entity->getEyeHeight(), 0)->subtractVector($eye);
+            $distance = $to->length();
+            if($distance > $radius || $distance < 0.0001) continue;
+
+            $dot = $to->normalize()->dot($direction);
+            if($dot > $bestScore) {
+                $bestScore = $dot;
+                $best = $uuid;
+            }
+        }
+
+        return $best ?? $this->findNearest($player, $radius);
+    }
+
+    public function markDirty(string $uuid): void {
+        $this->dirty[$uuid] = true;
+    }
+
+    public function saveAll(bool $force = false): void {
+        $batch = [];
+
+        foreach($this->npcData as $uuid => $data) {
+            if(!$force && !isset($this->dirty[$uuid])) continue;
+
+            $entity = $this->getEntity($uuid);
+            if($entity instanceof Living && !$entity->isClosed()) {
+                $this->npcData[$uuid]["health"] = $entity->getHealth();
             }
 
-            $pk = new \pocketmine\network\mcpe\protocol\SetActorDataPacket();
-            $pk = \pocketmine\network\mcpe\protocol\SetActorDataPacket::create(
-                $entityId,
-                [\pocketmine\network\mcpe\protocol\types\entity\EntityMetadataProperties::NAMETAG => new \pocketmine\network\mcpe\protocol\types\entity\StringMetadataProperty($adminTag)],
-                new \pocketmine\network\mcpe\protocol\types\entity\PropertySyncData([], []),
-                0
-            );
-            $player->getNetworkSession()->sendDataPacket($pk);
+            $batch[$uuid] = $this->npcData[$uuid];
         }
-    }
 
-    private function buildNameTag(array $data, ?\pocketmine\entity\Living $entity, string $uuid): string {
-        $title = $data["title"] ?? "NPC";
-        $subtitle = $data["subtitle"] ?? "";
-        $nameTag = $title;
-        if($subtitle !== "") {
-            $nameTag .= "\n" . $subtitle;
-        }
-        if(($data["aggressive"] ?? false) && $entity !== null) {
-            $health = (int)$entity->getHealth();
-            $maxHealth = (int)($data["maxHealth"] ?? 100);
-            $nameTag .= "\n§c" . $health . " §r/ §c" . $maxHealth;
-        }
-        return $nameTag;
-    }
+        if(empty($batch)) return;
 
-    public function saveAll(): void {
-        foreach($this->npcData as $uuid => $data) {
-            $this->saveNPC($uuid);
-        }
+        $this->database->saveBatch($batch);
+        $this->dirty = [];
     }
 
     public function saveNPC(string $uuid): void {
         if(!isset($this->npcData[$uuid])) return;
-        
-        $data = $this->npcData[$uuid];
-        $pos = $data["position"];
-        
-        $world = $this->plugin->getServer()->getWorldManager()->getWorldByName($pos["world"]);
-        if($world !== null) {
-            $entity = $world->getEntity($data["runtimeId"] ?? 0);
-            if($entity instanceof Living) {
-                $data["health"] = $entity->getHealth();
-                $this->npcData[$uuid]["health"] = $data["health"];
-            }
+
+        $entity = $this->getEntity($uuid);
+        if($entity instanceof Living && !$entity->isClosed()) {
+            $this->npcData[$uuid]["health"] = $entity->getHealth();
         }
-        
-        $this->database->saveNPC($uuid, $data);
+
+        $this->database->saveNPC($uuid, $this->npcData[$uuid]);
+        unset($this->dirty[$uuid]);
     }
 
     public function deleteNPC(string $uuid): void {
         if(!isset($this->npcData[$uuid])) return;
-        
-        $data = $this->npcData[$uuid];
-        $world = $this->plugin->getServer()->getWorldManager()->getWorldByName($data["position"]["world"]);
-        
-        if($world !== null) {
-            $entity = $world->getEntity($data["runtimeId"] ?? 0);
-            if($entity !== null) {
-                $entity->flagForDespawn();
-            }
+
+        $entity = $this->getEntity($uuid);
+        if($entity !== null && !$entity->isClosed()) {
+            $entity->flagForDespawn();
         }
 
-        unset($this->npcData[$uuid]);
-        unset($this->npcTargets[$uuid]);
-        unset($this->npcLastAttack[$uuid]);
-        unset($this->npcUuidByEntityId[$data["runtimeId"] ?? 0]);
-        
+        $entityId = $this->npcData[$uuid]["runtimeId"] ?? 0;
+
+        unset($this->npcData[$uuid], $this->npcTargets[$uuid], $this->npcLastAttack[$uuid], $this->dirty[$uuid], $this->npcUuidByEntityId[$entityId]);
+
+        foreach($this->selection as $player => $selected) {
+            if($selected === $uuid) unset($this->selection[$player]);
+        }
+
         $this->database->deleteNPC($uuid);
     }
 
     public function createNPC(array $data): string {
         $uuid = uniqid("npc_");
-        $this->npcData[$uuid] = $data;
+        $this->npcData[$uuid] = array_merge($this->getDefaultNPCData(0, 0, 0, ""), $data);
         $this->saveNPC($uuid);
         return $uuid;
     }
 
+    public function getEntity(string $uuid): ?NPCEntity {
+        $data = $this->npcData[$uuid] ?? null;
+        if($data === null) return null;
+
+        $entityId = $data["runtimeId"] ?? 0;
+        if($entityId === 0) return null;
+
+        $world = $this->plugin->getServer()->getWorldManager()->getWorldByName((string)($data["position"]["world"] ?? ""));
+        if($world === null || !$world->isLoaded()) return null;
+
+        $entity = $world->getEntity($entityId);
+        return ($entity instanceof NPCEntity && !$entity->isClosed()) ? $entity : null;
+    }
+
     public function spawnNPC(World $world, string $uuid): void {
         if(!isset($this->npcData[$uuid])) return;
-        
-        $data = $this->npcData[$uuid];
 
-        $oldEntityId = $data["runtimeId"] ?? 0;
-        if($oldEntityId > 0) {
-            $oldEntity = $world->getEntity($oldEntityId);
-            if($oldEntity !== null && !$oldEntity->isClosed()) {
-                $oldEntity->flagForDespawn();
-            }
-            unset($this->npcUuidByEntityId[$oldEntityId]);
+        $data = $this->npcData[$uuid];
+        if($data["stored"] ?? false) return;
+
+        $existing = $this->getEntity($uuid);
+        if($existing !== null) {
+            unset($this->npcUuidByEntityId[$existing->getId()]);
+            $existing->flagForDespawn();
         }
-        
-        $pos = $data["position"];
-        $yaw = $data["yaw"] ?? 0.0;
-        $pitch = $data["pitch"] ?? 0.0;
-        $location = new Location($pos["x"], $pos["y"], $pos["z"], $world, $yaw, $pitch);
-        $skinPath = $data["skin"] ?? "";
-        
-        $this->plugin->debugLog("Spawning NPC '{$data['title']}' ({$uuid}) at {$pos['x']}, {$pos['y']}, {$pos['z']} in world '{$pos['world']}'");
-        $this->plugin->debugLogAll("§eChargement du skin pour NPC {$uuid}: '{$skinPath}'");
-        if(isset($data["savedSkin"]) && is_array($data["savedSkin"]) && !empty($data["savedSkin"]["skinData"])) {
-            $this->plugin->debugLogAll("§aUtilisation du skin sauvegardé");
-            $skin = $this->loadSavedSkin($data["savedSkin"]);
-        } else {
-            $this->plugin->debugLogAll("§eChargement du skin depuis: {$skinPath}");
-            $skin = $this->skinManager->loadSkin($skinPath, null);
-            if(strpos($skinPath, "player:") === 0 && $skin->getSkinId() !== "Standard_Steve") {
-                $this->plugin->debugLogAll("§aSauvegarde du skin de joueur...");
-                $this->saveSkinData($uuid, $skin);
-            }
-        }
-        
+
+        $position = $data["position"];
+        $yaw = (float)($data["yaw"] ?? 0.0);
+        $pitch = max(-90.0, min(90.0, (float)($data["pitch"] ?? 0.0)));
+        $headYaw = (float)($data["headYaw"] ?? $yaw);
+
+        $race = (string)($data["race"] ?? Constants::DEFAULT_RACE);
+        $pose = (string)($data["pose"] ?? Constants::DEFAULT_POSE);
+        $hitbox = $this->modelManager->getHitbox($race, $pose);
+
+        $location = new Location((float)$position["x"], (float)$position["y"], (float)$position["z"], $world, $yaw, $pitch);
+
         $nbt = CompoundTag::create();
-        
         if($data["immobile"] ?? false) {
             $nbt->setByte("Immobile", 1);
         }
-        $entity = new Human($location, $skin, $nbt);
 
-        $entity->setCanSaveWithChunk(false);
+        $entity = new NPCEntity($location, $this->buildSkin($data), $nbt, $hitbox["height"], $hitbox["eyeHeight"], $hitbox["width"]);
+        $entity->setNpcUuid($uuid);
+        $entity->setHeadYaw($headYaw);
 
-        $maxHealth = (float)($data["maxHealth"] ?? 100.0);
-        $currentHealth = (float)($data["health"] ?? $maxHealth);
-        
+        $maxHealth = max(Constants::MIN_HEALTH, (float)($data["maxHealth"] ?? 100.0));
+        $health = (float)($data["health"] ?? $maxHealth);
+        $health = max(Constants::MIN_HEALTH, min($maxHealth, $health));
+
         $entity->setMaxHealth($maxHealth);
-        $entity->setHealth($currentHealth);
-        $entity->setScale($data["size"] ?? 1.0);
-        $entity->setNameTag($data["title"] ?? "NPC");
-        $entity->setNameTagVisible(true);
-        $entity->setNameTagAlwaysVisible(true);
-        
-        if($data["immobile"] ?? false) {
-            $entity->setHasGravity(false);
-            $entity->setNoClientPredictions(true);
-        }
-        
-        $this->equipArmor($entity, $data["armor"] ?? []);
+        $entity->setHealth($health);
+        $entity->setScale(max(Constants::MIN_SIZE, min(Constants::MAX_SIZE, (float)($data["size"] ?? 1.0))));
+        $entity->setNpcImmobile((bool)($data["immobile"] ?? false));
+        $entity->applyNametagMode((string)($data["nametagMode"] ?? Constants::NAMETAG_ALWAYS));
 
-        $entity->spawnToAll();
+        $this->equip($entity, $data["armor"] ?? []);
 
-        $this->refreshSkin($entity, $skin);
-
-        $entityId = $entity->getId();
-        $this->npcData[$uuid]["runtimeId"] = $entityId;
-        $this->npcUuidByEntityId[$entityId] = $uuid;
-
-        $this->updateNameTag($entity, $uuid);
-    }
-
-    private function refreshSkin(Human $entity, \pocketmine\entity\Skin $skin): void {
-
-        $this->plugin->getScheduler()->scheduleDelayedTask(new class($entity, $skin) extends Task {
-            private $entity;
-            private $skin;
-
-            public function __construct($entity, $skin) {
-                $this->entity = $entity;
-                $this->skin = $skin;
-            }
-
-            public function onRun(): void {
-                if(!$this->entity->isClosed()) {
-                    $this->entity->setSkin($this->skin);
-                    $this->entity->sendSkin();
+        if(VisibilityManager::isRestricted($data)) {
+            foreach($world->getPlayers() as $viewer) {
+                if(VisibilityManager::canSee($viewer, $data)) {
+                    $entity->spawnTo($viewer);
                 }
             }
-        }, 5);
-    }
-
-    private function saveSkinData(string $uuid, \pocketmine\entity\Skin $skin): void {
-        $this->npcData[$uuid]["savedSkin"] = [
-            "skinId" => $skin->getSkinId(),
-            "skinData" => base64_encode($skin->getSkinData()),
-            "capeData" => base64_encode($skin->getCapeData()),
-            "geometryName" => $skin->getGeometryName(),
-            "geometryData" => base64_encode($skin->getGeometryData())
-        ];
-        $this->saveNPC($uuid);
-    }
-
-    private function loadSavedSkin(array $savedSkin): \pocketmine\entity\Skin {
-        $skinId = $savedSkin["skinId"] ?? "CustomNPC";
-        $skinData = base64_decode($savedSkin["skinData"] ?? "");
-        $capeData = base64_decode($savedSkin["capeData"] ?? "");
-        $geometryName = $savedSkin["geometryName"] ?? "";
-        $geometryData = base64_decode($savedSkin["geometryData"] ?? "");
-        
-        $this->plugin->debugLogAll("§eChargement skin sauvegardé:");
-        $this->plugin->debugLogAll("  - ID: {$skinId}");
-        $this->plugin->debugLogAll("  - Data length: " . strlen($skinData));
-        $this->plugin->debugLogAll("  - Geometry: {$geometryName}");
-        
-        if(strlen($skinData) === 0) {
-            $this->plugin->getLogger()->error("§cSkin data vide ! Utilisation du skin par défaut");
-            return $this->skinManager->loadSkin("", null);
+        } else {
+            $entity->spawnToAll();
         }
-        
-        return new \pocketmine\entity\Skin(
-            $skinId,
-            $skinData,
-            $capeData,
-            $geometryName,
-            $geometryData
+
+        $this->npcData[$uuid]["runtimeId"] = $entity->getId();
+        $this->npcData[$uuid]["health"] = $health;
+        $this->npcUuidByEntityId[$entity->getId()] = $uuid;
+
+        $this->updateNameTag($uuid);
+    }
+
+    public function buildSkin(array $data): Skin {
+        $race = (string)($data["race"] ?? Constants::DEFAULT_RACE);
+        $pose = (string)($data["pose"] ?? Constants::DEFAULT_POSE);
+
+        $texture = null;
+
+        if($race !== Constants::DEFAULT_RACE && $this->raceManager->raceExists($race)) {
+            $path = $this->raceManager->getTexturePath($race);
+            if($path !== null) {
+                $texture = $this->skinManager->readTexture($path);
+            }
+        }
+
+        if($texture === null) {
+            $texture = $this->skinManager->decodeTexture($data["savedSkin"] ?? null);
+        }
+
+        if($texture === null) {
+            $texture = $this->skinManager->loadTexture((string)($data["skin"] ?? ""));
+        }
+
+        if($texture === null) {
+            $texture = $this->skinManager->getDefaultTexture();
+        }
+
+        $geometryName = $this->modelManager->getIdentifier($race, $pose);
+        $geometryData = $this->modelManager->buildGeometry($race, $pose);
+
+        return $this->skinManager->buildSkin($texture, $geometryName, $geometryData);
+    }
+
+    public function refreshSkin(string $uuid): void {
+        $entity = $this->getEntity($uuid);
+        if($entity === null) return;
+
+        $entity->setSkin($this->buildSkin($this->npcData[$uuid]));
+        $entity->sendSkin();
+    }
+
+    private function equip(NPCEntity $entity, array $armor): void {
+        $inventory = $entity->getArmorInventory();
+
+        $helmet = ItemParser::deserialize((string)($armor["helmet"] ?? ""));
+        $chestplate = ItemParser::deserialize((string)($armor["chestplate"] ?? ""));
+        $leggings = ItemParser::deserialize((string)($armor["leggings"] ?? ""));
+        $boots = ItemParser::deserialize((string)($armor["boots"] ?? ""));
+        $hand = ItemParser::deserialize((string)($armor["hand"] ?? ""));
+        $offhand = ItemParser::deserialize((string)($armor["offhand"] ?? ""));
+
+        $inventory->setHelmet($helmet ?? ItemParser::air());
+        $inventory->setChestplate($chestplate ?? ItemParser::air());
+        $inventory->setLeggings($leggings ?? ItemParser::air());
+        $inventory->setBoots($boots ?? ItemParser::air());
+        $entity->getInventory()->setItemInHand($hand ?? ItemParser::air());
+        $entity->getOffHandInventory()->setItem(0, $offhand ?? ItemParser::air());
+    }
+
+    public function buildNameTag(string $uuid, bool $adminView = false): string {
+        $data = $this->npcData[$uuid] ?? null;
+        if($data === null) return "";
+
+        $nameTag = $this->applyPlaceholders((string)($data["title"] ?? "NPC"), $uuid);
+
+        $subtitle = (string)($data["subtitle"] ?? "");
+        if($subtitle !== "") {
+            $nameTag .= "\n" . $this->applyPlaceholders($subtitle, $uuid);
+        }
+
+        if($data["aggressive"] ?? false) {
+            $entity = $this->getEntity($uuid);
+            $health = (int)($entity !== null ? $entity->getHealth() : ($data["health"] ?? 0));
+            $nameTag .= "\n§c" . $health . " §r/ §c" . (int)($data["maxHealth"] ?? 100);
+        }
+
+        if($adminView) {
+            $creator = (string)($data["creator"] ?? "");
+            $customId = (string)($data["customId"] ?? "");
+            $nameTag .= "\n§l§cID: §r§f" . ($customId !== "" ? $customId : $uuid);
+            if($creator !== "") {
+                $nameTag .= "\n§l§cPlace par: §r§f" . $creator;
+            }
+        }
+
+        return $nameTag;
+    }
+
+    public function applyPlaceholders(string $text, string $uuid): string {
+        if(!str_contains($text, "{")) return $text;
+
+        $server = $this->plugin->getServer();
+        $data = $this->npcData[$uuid] ?? [];
+        $worldName = (string)($data["position"]["world"] ?? "");
+        $world = $server->getWorldManager()->getWorldByName($worldName);
+
+        return str_replace(
+            ["{online}", "{max}", "{world}", "{world_players}", "{tps}"],
+            [
+                (string)count($server->getOnlinePlayers()),
+                (string)$server->getMaxPlayers(),
+                $worldName,
+                (string)($world !== null ? count($world->getPlayers()) : 0),
+                (string)round($server->getTicksPerSecond(), 1)
+            ],
+            $text
         );
     }
 
-    private function scheduleRefresh(Human $entity, string $uuid, array $data, float $maxHealth, float $currentHealth): void {
-        for($i = 1; $i <= 5; $i++) {
-            $this->plugin->getScheduler()->scheduleDelayedTask(new class($this, $entity, $uuid, $maxHealth, $currentHealth, $data) extends Task {
-                private $manager;
-                private $entity;
-                private $uuid;
-                private $maxHealth;
-                private $currentHealth;
-                private $data;
+    public function updateNameTag(string $uuid): void {
+        $entity = $this->getEntity($uuid);
+        if($entity === null) return;
 
-                public function __construct($manager, $entity, $uuid, $maxHealth, $currentHealth, $data) {
-                    $this->manager = $manager;
-                    $this->entity = $entity;
-                    $this->uuid = $uuid;
-                    $this->maxHealth = $maxHealth;
-                    $this->currentHealth = $currentHealth;
-                    $this->data = $data;
-                }
+        $entity->setNameTag($this->buildNameTag($uuid, false));
+        $entity->applyNametagMode((string)($this->npcData[$uuid]["nametagMode"] ?? Constants::NAMETAG_ALWAYS));
 
-                public function onRun(): void {
-                    if(!$this->entity->isClosed()) {
-                        $this->entity->setMaxHealth($this->maxHealth);
-                        $this->entity->setHealth($this->currentHealth);
-                        $this->entity->setScale($this->data["size"] ?? 1.0);
-                        $this->entity->setNameTagVisible(true);
-                        $this->entity->setNameTagAlwaysVisible(true);
-                        
-                        if($this->data["immobile"] ?? false) {
-                            $this->entity->setHasGravity(false);
-                            $this->entity->setNoClientPredictions(true);
-                        }
-                        
-                        $armorInv = $this->entity->getArmorInventory();
-                        $armor = $this->data["armor"] ?? [];
-                        
-                        if(!empty($armor["helmet"])){
-                            $item = ItemParser::parse($armor["helmet"]);
-                            if($item !== null) $armorInv->setHelmet($item);
-                        }
-                        if(!empty($armor["chestplate"])){
-                            $item = ItemParser::parse($armor["chestplate"]);
-                            if($item !== null) $armorInv->setChestplate($item);
-                        }
-                        if(!empty($armor["leggings"])){
-                            $item = ItemParser::parse($armor["leggings"]);
-                            if($item !== null) $armorInv->setLeggings($item);
-                        }
-                        if(!empty($armor["boots"])){
-                            $item = ItemParser::parse($armor["boots"]);
-                            if($item !== null) $armorInv->setBoots($item);
-                        }
-                        if(!empty($armor["hand"])){
-                            $item = ItemParser::parse($armor["hand"]);
-                            if($item !== null) $this->entity->getInventory()->setItemInHand($item);
-                        }
-                        
-                        $this->entity->sendSkin();
-                        
-                        $this->manager->updateNameTag($this->entity, $this->uuid);
-                    }
-                }
-            }, 5 * $i);
+        foreach($entity->getViewers() as $viewer) {
+            if($this->isAdmin($viewer->getName())) {
+                $this->sendAdminNameTag($viewer, $uuid);
+            }
         }
     }
 
-    private function equipArmor(Human $entity, array $armorData): void {
-        $armorInv = $entity->getArmorInventory();
-        
-        if(!empty($armorData["helmet"])) {
-            $item = ItemParser::parse($armorData["helmet"]);
-            if($item !== null) $armorInv->setHelmet($item);
-        }
-        
-        if(!empty($armorData["chestplate"])) {
-            $item = ItemParser::parse($armorData["chestplate"]);
-            if($item !== null) $armorInv->setChestplate($item);
-        }
-        
-        if(!empty($armorData["leggings"])) {
-            $item = ItemParser::parse($armorData["leggings"]);
-            if($item !== null) $armorInv->setLeggings($item);
-        }
-        
-        if(!empty($armorData["boots"])) {
-            $item = ItemParser::parse($armorData["boots"]);
-            if($item !== null) $armorInv->setBoots($item);
-        }
-        
-        if(!empty($armorData["hand"])) {
-            $item = ItemParser::parse($armorData["hand"]);
-            if($item !== null) $entity->getInventory()->setItemInHand($item);
+    public function sendAdminNameTag(Player $player, string $uuid): void {
+        $entity = $this->getEntity($uuid);
+        if($entity === null) return;
+
+        $packet = SetActorDataPacket::create(
+            $entity->getId(),
+            [EntityMetadataProperties::NAMETAG => new StringMetadataProperty($this->buildNameTag($uuid, true))],
+            new PropertySyncData([], []),
+            0
+        );
+
+        $player->getNetworkSession()->sendDataPacket($packet);
+    }
+
+    public function refreshNPCsForPlayer(Player $player): void {
+        $isAdmin = $this->isAdmin($player->getName());
+        $worldName = $player->getWorld()->getFolderName();
+
+        foreach($this->npcData as $uuid => $data) {
+            if(($data["position"]["world"] ?? "") !== $worldName) continue;
+
+            $entity = $this->getEntity($uuid);
+            if($entity === null) continue;
+
+            if($isAdmin) {
+                $this->sendAdminNameTag($player, $uuid);
+            } else {
+                $packet = SetActorDataPacket::create(
+                    $entity->getId(),
+                    [EntityMetadataProperties::NAMETAG => new StringMetadataProperty($this->buildNameTag($uuid, false))],
+                    new PropertySyncData([], []),
+                    0
+                );
+                $player->getNetworkSession()->sendDataPacket($packet);
+            }
         }
     }
 
-    public function updateNameTag(Living $entity, string $uuid): void {
-        if(!isset($this->npcData[$uuid])) return;
-        
-        $data = $this->npcData[$uuid];
-        $title = $data["title"] ?? "NPC";
-        $subtitle = $data["subtitle"] ?? "";
-        
-        $nameTag = $title;
-        if($subtitle !== "") {
-            $nameTag .= "\n" . $subtitle;
-        }
-        
-        if($data["aggressive"] ?? false) {
-            $health = (int)$entity->getHealth();
-            $maxHealth = (int)($data["maxHealth"] ?? 100);
-            $nameTag .= "\n§c" . $health . " §r/ §c" . $maxHealth;
-        }
-        
-        $entity->setNameTag($nameTag);
-    }
+    public function updateNPC(string $uuid): void {
+        $data = $this->npcData[$uuid] ?? null;
+        if($data === null) return;
 
-    public function updateNPC(World $world, string $uuid): void {
-        if(!isset($this->npcData[$uuid])) return;
-        
-        $data = $this->npcData[$uuid];
-        $oldEntityId = $data["runtimeId"] ?? 0;
-        $entity = $world->getEntity($oldEntityId);
-
-        if($entity !== null) {
-            $entity->flagForDespawn();
-            unset($this->npcUuidByEntityId[$oldEntityId]);
-        }
+        $world = $this->plugin->getServer()->getWorldManager()->getWorldByName((string)($data["position"]["world"] ?? ""));
+        if($world === null) return;
 
         $this->spawnNPC($world, $uuid);
     }
 
     public function respawnNPC(string $uuid): void {
         if(!isset($this->npcData[$uuid])) return;
-        
-        $data = $this->npcData[$uuid];
-        $this->npcData[$uuid]["health"] = (float)($data["maxHealth"] ?? 100.0);
-        
-        $world = $this->plugin->getServer()->getWorldManager()->getWorldByName($data["position"]["world"]);
-        
-        if($world !== null) {
-            $oldEntityId = $data["runtimeId"] ?? 0;
-            if($oldEntityId > 0) {
-                unset($this->npcUuidByEntityId[$oldEntityId]);
-            }
-            
-            $this->spawnNPC($world, $uuid);
-            $this->saveNPC($uuid);
-        }
+
+        $this->npcData[$uuid]["health"] = (float)($this->npcData[$uuid]["maxHealth"] ?? 100.0);
+        $this->npcData[$uuid]["stored"] = false;
+        $this->updateNPC($uuid);
+        $this->markDirty($uuid);
     }
 
     public function despawnAll(): void {
-        foreach($this->npcData as $uuid => $data) {
-            $world = $this->plugin->getServer()->getWorldManager()->getWorldByName($data["position"]["world"]);
-            if($world !== null) {
-                $entity = $world->getEntity($data["runtimeId"] ?? 0);
-                if($entity !== null && !$entity->isClosed()) {
-                    $entity->flagForDespawn();
-                }
+        foreach(array_keys($this->npcData) as $uuid) {
+            $entity = $this->getEntity($uuid);
+            if($entity !== null) {
+                $entity->flagForDespawn();
             }
         }
         $this->npcUuidByEntityId = [];
     }
 
-    public function findNPCByEntityId(int $entityId): ?string {
-        return $this->npcUuidByEntityId[$entityId] ?? null;
+    public function spawnWorld(World $world): int {
+        $count = 0;
+        foreach($this->npcData as $uuid => $data) {
+            if(($data["position"]["world"] ?? "") !== $world->getFolderName()) continue;
+            if($data["stored"] ?? false) continue;
+            if($this->getEntity($uuid) !== null) continue;
+
+            $this->spawnNPC($world, $uuid);
+            $count++;
+        }
+        return $count;
     }
 
-    public function repairMapping(int $entityId, string $uuid): void {
-        $this->npcUuidByEntityId[$entityId] = $uuid;
-        if(isset($this->npcData[$uuid])) {
-            $this->npcData[$uuid]["runtimeId"] = $entityId;
-        }
+    public function findNPCByEntityId(int $entityId): ?string {
+        return $this->npcUuidByEntityId[$entityId] ?? null;
     }
 
     public function getNPCData(string $uuid): ?array {
@@ -487,6 +552,43 @@ class NPCManager {
     public function updateNPCData(string $uuid, array $data): void {
         if(!isset($this->npcData[$uuid])) return;
         $this->npcData[$uuid] = array_merge($this->npcData[$uuid], $data);
+        $this->markDirty($uuid);
+    }
+
+    public function getWaypoints(string $uuid): array {
+        $data = $this->npcData[$uuid] ?? null;
+        if($data === null) return [];
+
+        $waypoints = $data["waypoints"] ?? [];
+        if(!is_array($waypoints)) return [];
+
+        $clean = [];
+        foreach($waypoints as $point) {
+            if(!is_array($point) || !isset($point["x"], $point["y"], $point["z"])) continue;
+
+            $clean[] = [
+                "x" => (float)$point["x"],
+                "y" => (float)$point["y"],
+                "z" => (float)$point["z"],
+                "wait" => max(0, (int)($point["wait"] ?? 0))
+            ];
+        }
+
+        return $clean;
+    }
+
+    public function setWaypoints(string $uuid, array $waypoints): void {
+        if(!isset($this->npcData[$uuid])) return;
+
+        $this->npcData[$uuid]["waypoints"] = array_values($waypoints);
+        $this->markDirty($uuid);
+        $this->saveNPC($uuid);
+    }
+
+    public function refreshNameTagFor(Player $player, string $uuid): void {
+        if($this->isAdmin($player->getName())) {
+            $this->sendAdminNameTag($player, $uuid);
+        }
     }
 
     public function getTarget(string $uuid): ?string {
@@ -503,16 +605,16 @@ class NPCManager {
 
     public function canAttack(string $uuid): bool {
         if(!isset($this->npcData[$uuid])) return false;
-        
-        $now = microtime(true);
-        $lastAttack = $this->npcLastAttack[$uuid] ?? 0;
-        $attackSpeed = $this->npcData[$uuid]["attackSpeed"] ?? 1;
-        $cooldown = 1.0 / $attackSpeed;
 
-        if($now - $lastAttack >= $cooldown) {
+        $now = microtime(true);
+        $last = $this->npcLastAttack[$uuid] ?? 0.0;
+        $cooldown = 1.0 / max(1, (int)($this->npcData[$uuid]["attackSpeed"] ?? 1));
+
+        if($now - $last >= $cooldown) {
             $this->npcLastAttack[$uuid] = $now;
             return true;
         }
+
         return false;
     }
 
@@ -528,13 +630,32 @@ class NPCManager {
         return isset($this->waitingForUuid[$playerName]);
     }
 
+    public function handleQuit(Player $player): void {
+        $name = $player->getName();
+        unset($this->selection[$name], $this->waitingForUuid[$name], $this->clipboard[$name]);
+
+        if(!(bool)$this->plugin->getConfig()->getNested("settings.admin-mode-persistent", false)) {
+            $this->setAdmin($name, false);
+        }
+    }
+
+    public function countInWorld(string $worldName): int {
+        $count = 0;
+        foreach($this->npcData as $data) {
+            if(($data["position"]["world"] ?? "") === $worldName) $count++;
+        }
+        return $count;
+    }
+
     public function getDefaultNPCData(float $x, float $y, float $z, string $worldName): array {
         return [
+            "customId" => "",
             "title" => "NPC",
             "subtitle" => "",
             "position" => ["x" => $x, "y" => $y, "z" => $z, "world" => $worldName],
             "yaw" => 0.0,
             "pitch" => 0.0,
+            "headYaw" => 0.0,
             "runtimeId" => 0,
             "health" => 100.0,
             "maxHealth" => 100.0,
@@ -548,21 +669,56 @@ class NPCManager {
             "canRegen" => false,
             "regenAmount" => 1,
             "size" => 1.0,
-            "entityType" => "human",
             "skin" => "",
-            "commandEnabled" => false,  
+            "savedSkin" => null,
+            "race" => Constants::DEFAULT_RACE,
+            "pose" => Constants::DEFAULT_POSE,
+            "commandEnabled" => false,
             "immobile" => false,
             "autoRespawn" => false,
             "canBeHit" => true,
+            "stored" => false,
             "commands" => [],
             "drops" => [],
             "creator" => "",
+            "nametagMode" => Constants::NAMETAG_ALWAYS,
+            "lookAtPlayers" => false,
+            "animation" => Constants::ANIM_NONE,
+            "animationHeight" => 10.0,
+            "animationSpeed" => 0.15,
+            "animationPause" => 40,
+            "dialogueEnabled" => false,
+            "dialogue" => [],
+            "dialogueDelay" => 20,
+            "interactSound" => "",
+            "usedOnce" => [],
+            "waypoints" => [],
+            "visibility" => [
+                "mode" => "all",
+                "permission" => ""
+            ],
+            "shop" => [
+                "enabled" => false,
+                "title" => "Boutique",
+                "trades" => []
+            ],
+            "dialogueTree" => [
+                "enabled" => false,
+                "start" => "start",
+                "nodes" => [
+                    "start" => [
+                        "lines" => [],
+                        "choices" => []
+                    ]
+                ]
+            ],
             "armor" => [
                 "helmet" => "",
                 "chestplate" => "",
                 "leggings" => "",
                 "boots" => "",
-                "hand" => ""
+                "hand" => "",
+                "offhand" => ""
             ]
         ];
     }
@@ -571,40 +727,66 @@ class NPCManager {
         $data = $this->getDefaultNPCData($x, $y, $z, $worldName);
         $data["yaw"] = $yaw;
         $data["pitch"] = $pitch;
+        $data["headYaw"] = $yaw;
         return $data;
     }
-    
+
+    public function changeSkinFromPlayer(string $uuid, Player $source): bool {
+        if(!isset($this->npcData[$uuid])) return false;
+
+        $this->npcData[$uuid]["savedSkin"] = $this->skinManager->encodeSkin($source->getSkin());
+        $this->npcData[$uuid]["skin"] = "player:" . $source->getName();
+        $this->markDirty($uuid);
+
+        $this->updateNPC($uuid);
+        $this->saveNPC($uuid);
+        return true;
+    }
+
     public function changeSkin(string $uuid, string $skinPath): bool {
         if(!isset($this->npcData[$uuid])) return false;
-        
-        try {
-            $skin = $this->skinManager->loadSkin($skinPath, null);
 
-            $this->npcData[$uuid]["skin"] = $skinPath;
+        $this->npcData[$uuid]["skin"] = $skinPath;
+        $this->npcData[$uuid]["savedSkin"] = null;
 
-            if(strpos($skinPath, "player:") === 0) {
-                $this->saveSkinData($uuid, $skin);
+        if(str_starts_with($skinPath, "player:")) {
+            $target = $this->plugin->getServer()->getPlayerByPrefix(substr($skinPath, 7));
+            if($target !== null) {
+                $this->npcData[$uuid]["savedSkin"] = $this->skinManager->encodeSkin($target->getSkin());
             }
-
-            $data = $this->npcData[$uuid];
-            $world = $this->plugin->getServer()->getWorldManager()->getWorldByName($data["position"]["world"]);
-            
-            if($world !== null) {
-                $entity = $world->getEntity($data["runtimeId"] ?? 0);
-                
-                if($entity instanceof Human && !$entity->isClosed()) {
-                    $entity->setSkin($skin);
-                    $entity->sendSkin();
-                    
-                    $this->saveNPC($uuid);
-                    return true;
-                }
-            }
-            
-            return false;
-        } catch(\Exception $e) {
-            $this->plugin->getLogger()->error("Erreur changement de skin: " . $e->getMessage());
-            return false;
         }
+
+        $this->updateNPC($uuid);
+        $this->saveNPC($uuid);
+        return true;
+    }
+
+    public function resetSkin(string $uuid): void {
+        if(!isset($this->npcData[$uuid])) return;
+
+        $this->npcData[$uuid]["skin"] = "";
+        $this->npcData[$uuid]["savedSkin"] = null;
+        $this->updateNPC($uuid);
+        $this->saveNPC($uuid);
+    }
+
+    public function changeRace(string $uuid, string $raceId): bool {
+        if(!isset($this->npcData[$uuid])) return false;
+        if($raceId !== Constants::DEFAULT_RACE && !$this->raceManager->raceExists($raceId)) return false;
+
+        $this->npcData[$uuid]["race"] = $raceId;
+        $this->updateNPC($uuid);
+        $this->saveNPC($uuid);
+        return true;
+    }
+
+    public function changePose(string $uuid, string $poseId): bool {
+        if(!isset($this->npcData[$uuid])) return false;
+        if(!$this->modelManager->poseExists($poseId)) return false;
+
+        $this->npcData[$uuid]["pose"] = $poseId;
+        $this->updateNPC($uuid);
+        $this->saveNPC($uuid);
+        return true;
     }
 }

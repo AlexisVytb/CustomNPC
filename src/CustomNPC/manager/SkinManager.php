@@ -1,252 +1,173 @@
 <?php
+
 namespace CustomNPC\manager;
 
 use pocketmine\entity\Skin;
-use pocketmine\player\Player;
 use CustomNPC\Main;
 
 class SkinManager {
+
     private Main $plugin;
-    
+    private ?string $defaultTexture = null;
+
     public function __construct(Main $plugin) {
         $this->plugin = $plugin;
     }
-    
-    public function loadSkin(string $skinPath, ?Player $player = null): Skin {
-        if($player !== null) {
-            $this->plugin->debugLogAll("§aCopie du skin du joueur: " . $player->getName());
-            return $player->getSkin();
-        }
 
-        if(empty($skinPath)) {
-            $this->plugin->debugLogAll("§7Utilisation du skin par défaut (aucun skin spécifié)");
-            return $this->getDefaultSkin();
-        }
-
-        if(strpos($skinPath, "player_") === 0) {
-            $this->plugin->debugLogAll("§7Skin de joueur sauvegardé détecté: {$skinPath}");
-            return $this->getDefaultSkin(); 
-        }
-
-        if(strpos($skinPath, "player:") === 0) {
-            $playerName = substr($skinPath, 7);
-            $this->plugin->debugLogAll("§eTentative de copie du skin du joueur: {$playerName}");
-            
-            $targetPlayer = $this->plugin->getServer()->getPlayerByPrefix($playerName);
-            
-            if($targetPlayer !== null) {
-                $this->plugin->debugLogAll("§aJoueur trouvé ! Copie du skin...");
-                $skin = $targetPlayer->getSkin();
-                $this->plugin->debugLogAll("§aSkin copié avec succès ! ID: " . $skin->getSkinId());
-                return $skin;
-            } else {
-                $this->plugin->getLogger()->warning("§cJoueur introuvable: {$playerName}");
-                $this->plugin->getLogger()->warning("§7Joueurs en ligne: " . implode(", ", array_map(fn($p) => $p->getName(), $this->plugin->getServer()->getOnlinePlayers())));
-                return $this->getDefaultSkin();
-            }
-        }
-        
-        $fullPath = $this->plugin->getDataFolder() . "skins/" . $skinPath;
-        
-        $this->plugin->debugLogAll("§eTentative de chargement du skin: {$fullPath}");
-        
-        if(file_exists($fullPath)) {
-            try {
-                $skin = $this->loadSkinFromFile($fullPath);
-                $this->plugin->debugLogAll("§aSkin chargé avec succès: {$skinPath}");
-                return $skin;
-            } catch(\Exception $e) {
-                $this->plugin->getLogger()->error("Erreur chargement skin: " . $e->getMessage());
-                $this->plugin->getLogger()->error("Fichier: {$fullPath}");
-                return $this->getDefaultSkin();
-            }
-        } else {
-            $this->plugin->getLogger()->warning("§cFichier skin introuvable: {$fullPath}");
-            $this->plugin->getLogger()->warning("§7Dossier: " . $this->plugin->getDataFolder() . "skins/");
-            return $this->getDefaultSkin();
-        }
+    public function skinsFolder(): string {
+        return $this->plugin->getDataFolder() . "skins/";
     }
-    
-    public function loadSkinFromFile(string $path): Skin {
-        if(!function_exists('imagecreatefrompng')) {
-            throw new \Exception("Extension GD non disponible");
+
+    public function loadTexture(string $skinPath): ?string {
+        if($skinPath === "") return null;
+
+        if(str_starts_with($skinPath, "player:")) {
+            $target = $this->plugin->getServer()->getPlayerByPrefix(substr($skinPath, 7));
+            return $target !== null ? $target->getSkin()->getSkinData() : null;
         }
-        
-        if(!file_exists($path)) {
-            throw new \Exception("Fichier introuvable: $path");
+
+        $fullPath = $this->skinsFolder() . basename($skinPath);
+        if(!file_exists($fullPath)) {
+            $this->plugin->getLogger()->warning("Fichier skin introuvable : " . $fullPath);
+            return null;
         }
-        
+
+        return $this->readTexture($fullPath);
+    }
+
+    public function readTexture(string $path): ?string {
+        if(!function_exists('imagecreatefrompng')) return null;
+        if(!file_exists($path)) return null;
+
         $img = @imagecreatefrompng($path);
-        if(!$img) {
-            throw new \Exception("Impossible de charger le fichier PNG");
-        }
-        
+        if($img === false) return null;
+
+        imagealphablending($img, false);
+        imagesavealpha($img, true);
+
         $width = imagesx($img);
         $height = imagesy($img);
-        
-        $validSizes = [
-            [64, 32],
-            [64, 64],
-            [128, 64],
-            [128, 128]
-        ];
-        
-        $isValid = false;
-        foreach($validSizes as $size) {
-            if($width === $size[0] && $height === $size[1]) {
-                $isValid = true;
-                break;
-            }
-        }
-        
-        if(!$isValid) {
+
+        if(!$this->isValidSize($width, $height)) {
             imagedestroy($img);
-            throw new \Exception("Dimensions invalides ($width x $height). Utilisez 64x32, 64x64, 128x64 ou 128x128");
+            $this->plugin->getLogger()->warning("Dimensions de skin invalides ({$width}x{$height}) : " . basename($path));
+            return null;
         }
-        
-        $skinData = '';
+
+        $data = '';
         for($y = 0; $y < $height; $y++) {
             for($x = 0; $x < $width; $x++) {
                 $rgba = imagecolorat($img, $x, $y);
-                
                 $r = ($rgba >> 16) & 0xFF;
                 $g = ($rgba >> 8) & 0xFF;
                 $b = $rgba & 0xFF;
-
                 $alpha = ($rgba & 0x7F000000) >> 24;
-                $a = 255 - ($alpha * 2);
-                
-                $skinData .= chr($r) . chr($g) . chr($b) . chr($a);
+                $a = 255 - (int)round($alpha * 255 / 127);
+                $data .= chr($r) . chr($g) . chr($b) . chr($a);
             }
         }
-        
+
         imagedestroy($img);
 
-        $skinId = "CustomNPC_" . basename($path, ".png") . "_" . time();
-
-        $geometryName = "geometry.humanoid.custom";
-        $geometryData = $this->getDefaultGeometry();
-
-        if ($width === 64 && $height === 32) {
-            $newSkinData = $skinData . str_repeat("\x00", 8192); // Padding for 64x64
-            $skinData = $newSkinData;
+        if($width === 64 && $height === 32) {
+            $data .= str_repeat("\x00", 64 * 32 * 4);
         }
 
-        return new Skin(
-            $skinId,
-            $skinData,
-            "",
-            $geometryName,
-            $geometryData
-        );
+        return $data;
     }
-    
-    private function getDefaultSkin(): Skin {
-        $skinData = str_repeat(chr(255) . chr(0) . chr(0) . chr(255), 64 * 64);
-        
-        return new Skin(
-            "Standard_Custom",
-            $skinData,
-            "",
-            "geometry.humanoid.custom",
-            $this->getDefaultGeometry()
-        );
-    }
-    
-    private function getDefaultGeometry(): string {
-        return json_encode([
-            "format_version" => "1.12.0",
-            "minecraft:geometry" => [
-                [
-                    "description" => [
-                        "identifier" => "geometry.humanoid.custom",
-                        "texture_width" => 64,
-                        "texture_height" => 64,
-                        "visible_bounds_width" => 2,
-                        "visible_bounds_height" => 2,
-                        "visible_bounds_offset" => [0, 1, 0]
-                    ],
-                    "bones" => [
-                        ["name" => "body", "pivot" => [0, 24, 0], "cubes" => [["origin" => [-4, 12, -2], "size" => [8, 12, 4], "uv" => [16, 16]]]],
-                        ["name" => "head", "pivot" => [0, 24, 0], "cubes" => [["origin" => [-4, 24, -4], "size" => [8, 8, 8], "uv" => [0, 0]]]],
-                        ["name" => "hat", "pivot" => [0, 24, 0], "cubes" => [["origin" => [-4, 24, -4], "size" => [8, 8, 8], "uv" => [32, 0], "inflate" => 0.5]]],
-                        ["name" => "rightArm", "pivot" => [-5, 22, 0], "cubes" => [["origin" => [-8, 12, -2], "size" => [4, 12, 4], "uv" => [40, 16]]]],
-                        ["name" => "leftArm", "pivot" => [5, 22, 0], "cubes" => [["origin" => [4, 12, -2], "size" => [4, 12, 4], "uv" => [32, 48]]]],
-                        ["name" => "rightLeg", "pivot" => [-1.9, 12, 0], "cubes" => [["origin" => [-3.9, 0, -2], "size" => [4, 12, 4], "uv" => [0, 16]]]],
-                        ["name" => "leftLeg", "pivot" => [1.9, 12, 0], "cubes" => [["origin" => [-0.1, 0, -2], "size" => [4, 12, 4], "uv" => [16, 48]]]]
-                    ]
-                ]
-            ]
-        ]);
-    }
-    
 
-    public function listAvailableSkins(): array {
-        $skinDir = $this->plugin->getDataFolder() . "skins/";
-        
-        if(!is_dir($skinDir)) {
-            @mkdir($skinDir, 0777, true);
-            return [];
+    public function buildSkin(string $texture, string $geometryName, string $geometryData, string $capeData = ""): Skin {
+        $skinId = "CustomNPC_" . substr(md5($texture . $geometryData), 0, 16);
+        return new Skin($skinId, $texture, $capeData, $geometryName, $geometryData);
+    }
+
+    public function getDefaultTexture(): string {
+        if($this->defaultTexture !== null) return $this->defaultTexture;
+
+        $path = $this->skinsFolder() . "steve.png";
+        $texture = $this->readTexture($path);
+
+        if($texture === null) {
+            $texture = $this->generateSteveTexture();
         }
-        
-        $skins = [];
-        $files = scandir($skinDir);
-        
-        foreach($files as $file) {
-            if($file === "." || $file === "..") {
-                continue;
-            }
-            
-            if(pathinfo($file, PATHINFO_EXTENSION) === "png") {
-                $filePath = $skinDir . $file;
-                $img = @imagecreatefrompng($filePath);
-                
-                if($img) {
-                    $width = imagesx($img);
-                    $height = imagesy($img);
-                    
-                    $skins[] = [
-                        "name" => $file,
-                        "path" => $file,
-                        "width" => $width,
-                        "height" => $height,
-                        "size" => filesize($filePath),
-                        "valid" => $this->isValidSkinSize($width, $height)
-                    ];
-                    
-                    imagedestroy($img);
+
+        $this->defaultTexture = $texture;
+        return $texture;
+    }
+
+    private function generateSteveTexture(): string {
+        $pixels = [];
+        for($i = 0; $i < 64 * 64; $i++) {
+            $pixels[] = chr(0) . chr(0) . chr(0) . chr(0);
+        }
+
+        $set = function(int $x0, int $y0, int $x1, int $y1, array $color) use (&$pixels): void {
+            for($y = $y0; $y <= $y1; $y++) {
+                for($x = $x0; $x <= $x1; $x++) {
+                    $pixels[$y * 64 + $x] = chr($color[0]) . chr($color[1]) . chr($color[2]) . chr(255);
                 }
             }
-        }
-        
-        return $skins;
+        };
+
+        $skin = [229, 178, 139];
+        $hair = [63, 44, 30];
+        $shirt = [0, 172, 172];
+        $pants = [58, 70, 148];
+        $shoes = [104, 84, 66];
+        $eye = [60, 60, 180];
+
+        $set(0, 0, 31, 15, $hair);
+        $set(8, 8, 15, 15, $skin);
+        $set(9, 12, 10, 12, $eye);
+        $set(13, 12, 14, 12, $eye);
+        $set(16, 16, 39, 31, $shirt);
+        $set(40, 16, 55, 31, $skin);
+        $set(0, 16, 15, 31, $pants);
+        $set(0, 28, 15, 31, $shoes);
+        $set(16, 48, 31, 63, $pants);
+        $set(16, 60, 31, 63, $shoes);
+        $set(32, 48, 47, 63, $skin);
+
+        return implode("", $pixels);
     }
-    
-    private function isValidSkinSize(int $width, int $height): bool {
-        $validSizes = [[64, 32], [64, 64], [128, 64], [128, 128]];
-        
-        foreach($validSizes as $size) {
-            if($width === $size[0] && $height === $size[1]) {
-                return true;
-            }
+
+    public function isValidSize(int $width, int $height): bool {
+        foreach([[64, 32], [64, 64], [128, 64], [128, 128]] as [$w, $h]) {
+            if($width === $w && $height === $h) return true;
         }
-        
         return false;
     }
-    
-    public function importSkin(string $sourcePath, string $name): bool {
-        $skinDir = $this->plugin->getDataFolder() . "skins/";
-        
-        if(!is_dir($skinDir)) {
-            @mkdir($skinDir, 0777, true);
+
+    public function listAvailableSkins(): array {
+        $folder = $this->skinsFolder();
+        if(!is_dir($folder)) {
+            @mkdir($folder, 0777, true);
+            return [];
         }
-        
-        if(!file_exists($sourcePath)) {
-            return false;
+
+        $skins = [];
+        foreach(scandir($folder) as $file) {
+            if($file === "." || $file === "..") continue;
+            if(strtolower(pathinfo($file, PATHINFO_EXTENSION)) !== "png") continue;
+            $skins[] = $file;
         }
-        
-        $destPath = $skinDir . $name;
-        
-        return copy($sourcePath, $destPath);
+
+        return $skins;
+    }
+
+    public function encodeSkin(\pocketmine\entity\Skin $skin): array {
+        return [
+            "skinId" => $skin->getSkinId(),
+            "skinData" => base64_encode($skin->getSkinData()),
+            "capeData" => base64_encode($skin->getCapeData()),
+            "geometryName" => $skin->getGeometryName(),
+            "geometryData" => base64_encode($skin->getGeometryData())
+        ];
+    }
+
+    public function decodeTexture(?array $savedSkin): ?string {
+        if(!is_array($savedSkin) || empty($savedSkin["skinData"])) return null;
+        $data = base64_decode((string)$savedSkin["skinData"], true);
+        return ($data === false || $data === "") ? null : $data;
     }
 }

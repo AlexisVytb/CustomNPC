@@ -1,46 +1,108 @@
 name: CustomNPC
-version: 2.2.0-dev
+version: 3.1.0
 main: CustomNPC\Main
 api: 5.0.0
 author: AlexisV
-description: Plugin de NPCs personnalisables avec IA
+description: Plugin de NPCs personnalisables avec IA, dialogues et animations
+
+depend: [FormAPI]
 
 commands:
   npc:
-    description: Commandes NPC admin
-    usage: /npc <admin|wand|delete|rotate|armor|list|skin|listskins|debug|refresh|uuid|fakeplayer>
-    permission: customnpc.admin
+    description: Gestion des NPCs
+    usage: /npc <help|admin|wand|select|create|spawn|delete|id|list|gui|tp|here|move|rotate|armor|drops|skin|race|pose|nametag|anim|waypoint|dialogue|tree|shop|visibility|logs|info|refresh|reload|export|import|debug|fakeplayer>
+    permission: customnpc.use
+    aliases: [pnj, customnpc]
   npcadmin:
     description: Activer le mode admin NPC
     permission: customnpc.admin
-
+  sudo:
+    description: Executer une action a la place d'un joueur
+    usage: /sudo <joueur> <action>
+    permission: customnpc.sudo
 
 permissions:
-  customnpc.wand:
-    description: Permet d'obtenir la baguette NPC
-    default: op
-  customnpc.spawn:
-    description: Permet de créer un NPC
-    default: op
-  customnpc.rotate:
-    description: Permet de supprimer un NPC
-    default: op
-  customnpc.armor:
-    description: Permet de configurer l'armure d'un NPC
-    default: op
-  customnpc.list:
-    description: Permet de voir la list des ncps
-    default: op
-  customnpc.uuid:
-    description: Permet d'obtenir l'UUID d'un NPC
-    default: op
-  customnpc.fakeplayer:
-    description: Permet de configurer un fake player
-    default: op
-  customnpc.sudo:
-    description: Permet s'utiliser le /sudo
+  customnpc.use:
+    description: Acces de base aux commandes NPC
     default: op
   customnpc.admin:
-    description: Permet d'activer le mode admin NPC
+    description: Mode admin NPC
     default: op
-
+  customnpc.wand:
+    description: Obtenir et utiliser la baguette NPC
+    default: op
+  customnpc.create:
+    description: Creer un NPC
+    default: op
+  customnpc.delete:
+    description: Supprimer un NPC
+    default: op
+  customnpc.edit:
+    description: Modifier un NPC
+    default: op
+  customnpc.move:
+    description: Deplacer un NPC
+    default: op
+  customnpc.armor:
+    description: Configurer l'equipement d'un NPC
+    default: op
+  customnpc.drops:
+    description: Configurer les drops d'un NPC
+    default: op
+  customnpc.skin:
+    description: Changer le skin d'un NPC
+    default: op
+  customnpc.race:
+    description: Changer la race d'un NPC
+    default: op
+  customnpc.pose:
+    description: Changer la pose d'un NPC
+    default: op
+  customnpc.anim:
+    description: Configurer les animations d'un NPC
+    default: op
+  customnpc.shop:
+    description: Configurer la boutique d'un NPC
+    default: op
+  customnpc.waypoint:
+    description: Configurer les patrouilles
+    default: op
+  customnpc.visibility:
+    description: Configurer la visibilite d'un NPC
+    default: op
+  customnpc.logs:
+    description: Consulter l'historique des modifications
+    default: op
+  customnpc.dialogue:
+    description: Configurer les dialogues d'un NPC
+    default: op
+  customnpc.list:
+    description: Lister les NPCs
+    default: op
+  customnpc.tp:
+    description: Se teleporter aux NPCs
+    default: op
+  customnpc.uuid:
+    description: Obtenir l'UUID d'un NPC
+    default: op
+  customnpc.fakeplayer:
+    description: Configurer un fake player
+    default: op
+  customnpc.reload:
+    description: Recharger la configuration
+    default: op
+  customnpc.export:
+    description: Exporter / importer les NPCs
+    default: op
+  customnpc.debug:
+    description: Commandes de debug
+    default: op
+  customnpc.sudo:
+    description: Utiliser /sudo
+    default: op
+  customnpc.sudo.exempt:
+    description: Ne peut pas etre cible par /sudo
+    default: false
+  customnpc.ignored:
+    description: Ignore par les NPCs agressifs
+    default: false

@@ -2,9 +2,10 @@
 
 namespace CustomNPC\gui;
 
-use pocketmine\player\Player;
-use pocketmine\item\VanillaItems;
 use jojoe77777\FormAPI\SimpleForm;
+use pocketmine\item\VanillaItems;
+use pocketmine\player\Player;
+use CustomNPC\inventory\ChestEditor;
 use CustomNPC\manager\NPCManager;
 use CustomNPC\utils\Constants;
 
@@ -17,153 +18,192 @@ class MainGUI {
     }
 
     public function open(Player $player, ?string $uuid = null): void {
-        $form = new SimpleForm(function(Player $player, $data) use ($uuid) {
-            if($data === null) return;
-
-            switch($data) {
-                case 0:
-                    (new GeneralInfoGUI($this->npcManager))->open($player, $uuid);
-                    break;
-                case 1:
-                    (new CombatInfoGUI($this->npcManager))->open($player, $uuid);
-                    break;
-                case 2:
-                    (new OtherInfoGUI($this->npcManager))->open($player, $uuid);
-                    break;
-                case 3:
-                    $this->giveNPCItem($player, $uuid);
-                    break;
-                case 4:
-                    $this->duplicateNPC($player, $uuid);
-                    break;
-                case 5:
-                    $this->deleteNPCConfirm($player, $uuid);
-                    break;
-                case 6:
-                    (new CommandInfoGUI($this->npcManager))->open($player, $uuid);
-                    break;
-            }
-        });
-
-        $form->setTitle("§6Menu NPC");
-        
-        if($uuid !== null) {
-            $data = $this->npcManager->getNPCData($uuid);
-            $form->setContent("§7UUID: §e" . $uuid . "\n§7Titre: §f" . ($data["title"] ?? "NPC") . "\n§7Vie: §c" . (int)($data["health"] ?? 100) . "§7/§c" . (int)($data["maxHealth"] ?? 100));
-        } else {
-            $form->setContent("§7Clique sur un NPC avec la wand\n§7ou crée-en un nouveau");
-        }
         if($uuid === null) {
-            $player->sendMessage("§cAucun NPC sélectionné !");
+            $uuid = $this->npcManager->getSelection($player);
+        }
+
+        if($uuid === null) {
+            $player->sendMessage("§cAucun NPC selectionne. Utilise §e/npc select§c.");
             return;
         }
 
         $data = $this->npcManager->getNPCData($uuid);
         if($data === null) {
-            $player->sendMessage("§cNPC introuvable !");
+            $player->sendMessage("§cNPC introuvable.");
             return;
         }
-        
-        $form->addButton("§aInfo Général\n§0Vie, vitesse, nom...");
-        $form->addButton("§cInfo Combat\n§0Attaques, armure...");
-        $form->addButton("§bInfo Autres\n§0Taille, skin...");
-        $form->addButton("§ePrendre l'item\n§0Récupérer le NPC");
-        $form->addButton("§dDupliquer\n§0Copier ce NPC");
-        $form->addButton("§4Supprimer\n§0Effacer ce NPC");
-        $form->addButton("§sCommandes\n§0Voir les commandes");
+
+        $form = new SimpleForm(function(Player $player, $index) use ($uuid) {
+            if($index === null) return;
+
+            switch($index) {
+                case 0: (new GeneralInfoGUI($this->npcManager))->open($player, $uuid); break;
+                case 1: (new CombatInfoGUI($this->npcManager))->open($player, $uuid); break;
+                case 2: (new AppearanceGUI($this->npcManager))->open($player, $uuid); break;
+                case 3: (new NametagGUI($this->npcManager))->open($player, $uuid); break;
+                case 4: $this->openArmor($player, $uuid); break;
+                case 5: $this->openDrops($player, $uuid); break;
+                case 6: (new AnimationGUI($this->npcManager))->open($player, $uuid); break;
+                case 7: (new WaypointGUI($this->npcManager))->open($player, $uuid); break;
+                case 8: (new DialogueGUI($this->npcManager))->open($player, $uuid); break;
+                case 9: $this->openDialogueTree($player, $uuid); break;
+                case 10: $this->openShop($player, $uuid); break;
+                case 11: (new CommandInfoGUI($this->npcManager))->open($player, $uuid); break;
+                case 12: (new VisibilityGUI($this->npcManager))->open($player, $uuid); break;
+                case 13: $this->giveNPCItem($player, $uuid); break;
+                case 14: $this->duplicate($player, $uuid); break;
+                case 15: $this->confirmDelete($player, $uuid); break;
+            }
+        });
+
+        $identifier = (string)($data["customId"] ?? "");
+        $race = $this->npcManager->getRaceManager()->getRaceLabel((string)($data["race"] ?? Constants::DEFAULT_RACE));
+        $pose = $this->npcManager->getModelManager()->getPoseLabel((string)($data["pose"] ?? Constants::DEFAULT_POSE));
+
+        $content = "§7ID: §e" . ($identifier !== "" ? $identifier : $uuid) . "\n";
+        $content .= "§7Titre: §f" . ($data["title"] ?? "NPC") . "\n";
+        $content .= "§7Vie: §c" . (int)($data["health"] ?? 0) . "§7/§c" . (int)($data["maxHealth"] ?? 100) . "\n";
+        $content .= "§7Apparence: §f" . $race . " §7/ §f" . $pose . "\n";
+        $content .= "§7Agressif: " . (($data["aggressive"] ?? false) ? "§aoui" : "§cnon") . " §8| §7Commandes: " . (($data["commandEnabled"] ?? false) ? "§aoui" : "§cnon") . "\n";
+        $content .= "§7Boutique: " . (($data["shop"]["enabled"] ?? false) ? "§aouverte" : "§cfermee") . " §8| §7Dialogue: " . (($data["dialogueTree"]["enabled"] ?? false) ? "§aarbre" : (($data["dialogueEnabled"] ?? false) ? "§asimple" : "§cnon"));
+
+        $form->setTitle("§6Menu NPC");
+        $form->setContent($content);
+
+        $form->addButton("§aInfos generales\n§8Vie, vitesse, nom");
+        $form->addButton("§cCombat\n§8Degats, fleches, effets");
+        $form->addButton("§bApparence\n§8Skin, race, pose, taille");
+        $form->addButton("§eNametag\n§8Visibilite et affichage");
+        $form->addButton("§6Equipement\n§8Coffre d'armure");
+        $form->addButton("§6Drops\n§8Coffre de butin");
+        $form->addButton("§dAnimations\n§8Mouvements automatiques");
+        $form->addButton("§dPatrouille\n§8Points de passage");
+        $form->addButton("§5Dialogues simples\n§8Lignes a l'interaction");
+        $form->addButton("§5Arbre de dialogue\n§8Choix et actions");
+        $form->addButton("§6Boutique\n§8Echanges et stock");
+        $form->addButton("§3Commandes\n§8Actions a l'interaction");
+        $form->addButton("§9Visibilite\n§8Qui voit ce NPC");
+        $form->addButton("§ePrendre l'item\n§8Ranger le NPC");
+        $form->addButton("§dDupliquer\n§8Copier sur ma position");
+        $form->addButton("§4Supprimer\n§8Effacer definitivement");
 
         $player->sendForm($form);
     }
 
-    private function giveNPCItem(Player $player, ?string $uuid): void {
-        if($uuid === null) {
-            $player->sendMessage("§cNPC introuvable !");
-            return;
-        }
-        $data = $this->npcManager->getNPCData($uuid);
-        if($data === null) {
-            $player->sendMessage("§cNPC introuvable !");
-            return;
-        }
+    private function openShop(Player $player, string $uuid): void {
+        $plugin = \CustomNPC\Main::getInstance();
+        (new ShopEditGUI($this->npcManager, $plugin->getShopManager()))->open($player, $uuid);
+    }
 
-        $world = $player->getWorld();
-        $entity = $world->getEntity($data["runtimeId"] ?? 0);
+    private function openDialogueTree(Player $player, string $uuid): void {
+        $plugin = \CustomNPC\Main::getInstance();
+        (new DialogueTreeGUI($this->npcManager, $plugin->getDialogueRunner()))->open($player, $uuid);
+    }
+
+    private function openArmor(Player $player, string $uuid): void {
+        $editor = new ChestEditor($this->npcManager);
+
+        $opened = $editor->openArmor($player, $uuid, function(Player $player) use ($uuid): void {
+            $this->open($player, $uuid);
+        });
+
+        if(!$opened) {
+            (new ArmorGUI($this->npcManager))->open($player, $uuid);
+        }
+    }
+
+    private function openDrops(Player $player, string $uuid): void {
+        $editor = new ChestEditor($this->npcManager);
+
+        $opened = $editor->openDrops($player, $uuid, function(Player $player) use ($uuid): void {
+            $this->open($player, $uuid);
+        });
+
+        if(!$opened) {
+            (new DropsGUI($this->npcManager))->open($player, $uuid);
+        }
+    }
+
+    private function giveNPCItem(Player $player, string $uuid): void {
+        $data = $this->npcManager->getNPCData($uuid);
+        if($data === null) return;
+
+        $entity = $this->npcManager->getEntity($uuid);
         if($entity !== null) {
             $entity->flagForDespawn();
         }
 
+        $this->npcManager->updateNPCData($uuid, ["stored" => true, "runtimeId" => 0]);
+        $this->npcManager->saveNPC($uuid);
+
         $item = VanillaItems::EMERALD()->setCustomName(Constants::NPC_ITEM_PREFIX . ($data["title"] ?? "NPC"));
-        $lore = [
+        $item->setLore([
             "§7UUID: §e" . $uuid,
-            "§7Clic droit pour placer",
-            "§7",
-            "§eNPC: §f" . ($data["title"] ?? "NPC"),
+            "§7Clic droit sur un bloc pour placer",
+            "",
             "§eVie: §c" . (int)($data["maxHealth"] ?? 100),
-            "§eAgressif: " . (($data["aggressive"] ?? false) ? "§aOui" : "§cNon")
-        ];
-        $item->setLore($lore);
+            "§eAgressif: " . (($data["aggressive"] ?? false) ? "§aoui" : "§cnon")
+        ]);
 
-        $nbt = $item->getNamedTag();
-        $nbt->setString("npc_uuid", $uuid);
-        $item->setNamedTag($nbt);
+        $tag = $item->getNamedTag();
+        $tag->setString(Constants::ITEM_TAG, $uuid);
+        $item->setNamedTag($tag);
 
-        $player->getInventory()->addItem($item);
-        $player->sendMessage("§aTu as récupéré le NPC en item !");
+        if($player->getInventory()->canAddItem($item)) {
+            $player->getInventory()->addItem($item);
+        } else {
+            $player->getWorld()->dropItem($player->getPosition(), $item);
+        }
+
+        $player->sendMessage("§aNPC range dans un item.");
     }
 
-    private function duplicateNPC(Player $player, ?string $uuid): void {
-        if($uuid === null) {
-            $player->sendMessage("§cNPC introuvable !");
-            return;
-        }
+    private function duplicate(Player $player, string $uuid): void {
         $data = $this->npcManager->getNPCData($uuid);
-        if($data === null) {
-            $player->sendMessage("§cNPC introuvable !");
-            return;
-        }
+        if($data === null) return;
 
-        $pos = $player->getPosition();
+        $position = $player->getPosition();
+        $location = $player->getLocation();
+
         $data["position"] = [
-            "x" => $pos->getX(),
-            "y" => $pos->getY(),
-            "z" => $pos->getZ(),
+            "x" => $position->x,
+            "y" => $position->y,
+            "z" => $position->z,
             "world" => $player->getWorld()->getFolderName()
         ];
+        $data["yaw"] = $location->yaw;
+        $data["pitch"] = $location->pitch;
+        $data["headYaw"] = $location->yaw;
         $data["runtimeId"] = 0;
+        $data["customId"] = "";
+        $data["stored"] = false;
+        $data["usedOnce"] = [];
         $data["creator"] = $player->getName();
-        
+
         $newUuid = $this->npcManager->createNPC($data);
         $this->npcManager->spawnNPC($player->getWorld(), $newUuid);
-        
-        $player->sendMessage("§aNPC dupliqué ! Nouveau UUID: §e" . $newUuid);
+        $this->npcManager->select($player, $newUuid);
+
+        $player->sendMessage("§aNPC duplique et selectionne. §7UUID: §e" . $newUuid);
     }
 
-    private function deleteNPCConfirm(Player $player, ?string $uuid): void {
-        if($uuid === null) {
-            $player->sendMessage("§cNPC introuvable !");
-            return;
-        }
+    private function confirmDelete(Player $player, string $uuid): void {
         $data = $this->npcManager->getNPCData($uuid);
-        if($data === null) {
-            $player->sendMessage("§cNPC introuvable !");
-            return;
-        }
+        if($data === null) return;
 
-        $form = new SimpleForm(function(Player $player, $formData) use ($uuid) {
-            if($formData === null) return;
+        $form = new SimpleForm(function(Player $player, $index) use ($uuid) {
+            if($index === null) return;
 
-            if($formData === 0) {
+            if($index === 0) {
                 $this->npcManager->deleteNPC($uuid);
-                $player->sendMessage("§aNPC supprimé avec succès !");
+                $player->sendMessage("§aNPC supprime.");
             } else {
-                $player->sendMessage("§eSuppression annulée.");
                 $this->open($player, $uuid);
             }
         });
 
-        $npcTitle = $data["title"] ?? "NPC";
         $form->setTitle("§cConfirmer la suppression");
-        $form->setContent("§7Êtes-vous sûr de vouloir supprimer le NPC:\n§e" . $npcTitle . "\n§7UUID: §e" . $uuid . "\n\n§cCette action est irréversible !");
+        $form->setContent("§7Supprimer definitivement :\n§e" . ($data["title"] ?? "NPC") . "\n§7UUID: §e" . $uuid);
         $form->addButton("§aOui, supprimer");
         $form->addButton("§cNon, annuler");
 
