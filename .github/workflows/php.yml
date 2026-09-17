@@ -18,18 +18,23 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
-          tools: composer
+          extensions: phar, mbstring, ctype
 
-      - name: Install Dependencies & Inject Virions
+      - name: Download DEVirion Script
         run: |
-          composer global require poggit/virion
-          composer install --prefer-dist --no-progress
+          wget -O devirion.php https://raw.githubusercontent.com/poggit/support/master/virion.php
 
-      - name: Build PHAR
+      - name: Install Virions via Composer
         run: |
-          poggit-virion build --out=CustomNPC.phar
+          if [ -f composer.json ]; then
+            composer install --no-dev --prefer-dist --no-progress
+          fi
 
-      - name: Upload PHAR Artifact
+      - name: Build PHAR with Virions
+        run: |
+          php devirion.php . CustomNPC.phar
+
+      - name: Upload PHAR
         uses: actions/upload-artifact@v4
         with:
           name: CustomNPC-phar
