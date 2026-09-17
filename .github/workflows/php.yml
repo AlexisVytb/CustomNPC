@@ -18,24 +18,27 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
-          extensions: phar, mbstring, ctype
+          extensions: phar, mbstring, ctype, zlib
+          ini-values: phar.readonly=0
 
-      - name: Download DEVirion Script
+      - name: Install Box (Phar Builder)
         run: |
-          wget -O devirion.php https://raw.githubusercontent.com/poggit/support/master/virion.php
+          wget https://github.com/box-project/box/releases/download/4.5.1/box.phar -O box
+          chmod +x box
+          sudo mv box /usr/local/bin/box
 
-      - name: Install Virions via Composer
+      - name: Install Composer Dependencies
         run: |
           if [ -f composer.json ]; then
             composer install --no-dev --prefer-dist --no-progress
           fi
 
-      - name: Build PHAR with Virions
+      - name: Build PHAR
         run: |
-          php devirion.php . CustomNPC.phar
+          box compile
 
       - name: Upload PHAR
         uses: actions/upload-artifact@v4
         with:
           name: CustomNPC-phar
-          path: CustomNPC.phar
+          path: "*.phar"
