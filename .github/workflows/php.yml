@@ -30,7 +30,7 @@ jobs:
       - name: Install Composer Dependencies
         run: |
           if [ -f composer.json ]; then
-            composer install --no-dev --prefer-dist --no-progress
+            composer install --no-dev --prefer-dist --no-progress --ignore-platform-reqs
           fi
 
       - name: Build PHAR
