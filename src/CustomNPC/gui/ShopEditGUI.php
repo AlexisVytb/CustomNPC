@@ -2,8 +2,8 @@
 
 namespace CustomNPC\gui;
 
-use jojoe77777\FormAPI\CustomForm;
-use jojoe77777\FormAPI\SimpleForm;
+use CustomNPC\form\CustomForm;
+use CustomNPC\form\SimpleForm;
 use pocketmine\player\Player;
 use CustomNPC\manager\NPCManager;
 use CustomNPC\manager\ShopManager;
@@ -276,6 +276,10 @@ class ShopEditGUI {
     }
 
     private function preview(Player $player, string $uuid): void {
-        (new ShopGUI($this->npcManager, $this->shopManager))->open($player, $uuid);
+        \CustomNPC\Main::getInstance()->getScheduler()->scheduleDelayedTask(new \pocketmine\scheduler\ClosureTask(function() use ($player, $uuid): void {
+            if($player->isConnected()) {
+                (new ShopGUI($this->npcManager, $this->shopManager))->open($player, $uuid);
+            }
+        }), 5);
     }
 }

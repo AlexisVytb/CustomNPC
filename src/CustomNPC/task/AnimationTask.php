@@ -4,6 +4,7 @@ namespace CustomNPC\task;
 
 use pocketmine\math\Vector3;
 use pocketmine\scheduler\Task;
+use pocketmine\world\World;
 use CustomNPC\manager\NPCManager;
 use CustomNPC\utils\Constants;
 
@@ -80,21 +81,45 @@ class AnimationTask extends Task {
                 $destination = new Vector3((float)$target["x"], (float)$target["y"], (float)$target["z"]);
                 $current = $entity->getPosition()->asVector3();
 
-                $delta = $destination->subtractVector($current);
-                $distance = $delta->length();
+                $deltaX = $destination->x - $current->x;
+                $deltaZ = $destination->z - $current->z;
+                $deltaY = $destination->y - $current->y;
+                $horizontal = sqrt($deltaX * $deltaX + $deltaZ * $deltaZ);
 
-                if($distance <= max(0.05, $speed)) {
-                    $entity->moveTo($destination);
+                $reach = max(0.06, $speed);
 
-                    $state["wait"] = (int)($target["wait"] ?? 0) > 0 ? (int)$target["wait"] : $pause;
+                if($horizontal <= $reach && abs($deltaY) <= max(0.25, $speed)) {
+                    $next = $waypoints[($state["index"] + 1) % count($waypoints)];
+                    $facing = atan2((float)$next["z"] - $destination->z, (float)$next["x"] - $destination->x) * 180 / M_PI - 90;
+
+                    $entity->moveTo($destination, $facing);
+
+                    $wait = (int)($target["wait"] ?? 0);
+                    $state["wait"] = $wait > 0 ? $wait : $pause;
                     $state["index"] = ($state["index"] + 1) % count($waypoints);
                     break;
                 }
 
-                $step = $delta->normalize()->multiply($speed);
-                $yaw = atan2($step->z, $step->x) * 180 / M_PI - 90;
+                if($horizontal < 0.0001) {
+                    $step = max(-$speed, min($speed, $deltaY));
+                    $entity->moveTo(new Vector3($current->x, $current->y + $step, $current->z));
+                    break;
+                }
 
-                $entity->moveTo($current->addVector($step), $yaw);
+                $ratio = min(1.0, $speed / $horizontal);
+
+                $newX = $current->x + $deltaX * $ratio;
+                $newZ = $current->z + $deltaZ * $ratio;
+                $newY = $current->y + $deltaY * $ratio;
+
+                $ground = $this->groundHeight($entity->getWorld(), $newX, $newZ, $newY);
+
+                if($ground !== null && abs($ground - $newY) <= 1.5) {
+                    $newY = $ground;
+                }
+
+                $yaw = atan2($deltaZ, $deltaX) * 180 / M_PI - 90;
+                $entity->moveTo(new Vector3($newX, $newY, $newZ), $yaw);
                 break;
 
             case "climb":
@@ -184,6 +209,35 @@ class AnimationTask extends Task {
         }
 
         unset($state);
+    }
+
+    private function groundHeight(World $world, float $x, float $z, float $y): ?float {
+        $blockX = (int)floor($x);
+        $blockZ = (int)floor($z);
+
+        if(!$world->isChunkLoaded($blockX >> 4, $blockZ >> 4)) return null;
+
+        $start = (int)floor($y) + 1;
+        $end = (int)floor($y) - 2;
+
+        for($blockY = $start; $blockY >= $end; $blockY--) {
+            if($blockY < $world->getMinY() || $blockY > $world->getMaxY()) continue;
+
+            $block = $world->getBlockAt($blockX, $blockY, $blockZ);
+
+            $top = null;
+            foreach($block->getCollisionBoxes() as $box) {
+                if($top === null || $box->maxY > $top) {
+                    $top = $box->maxY;
+                }
+            }
+
+            if($top !== null) {
+                return (float)$top;
+            }
+        }
+
+        return null;
     }
 
     public function reset(string $uuid): void {

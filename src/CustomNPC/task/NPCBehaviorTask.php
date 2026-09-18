@@ -53,18 +53,28 @@ class NPCBehaviorTask extends Task {
             }
 
             if($lookAt) {
-                $nearest = $this->findNearestViewer($entity, $lookRadius);
+                $nearest = $this->findNearestViewer($entity, $lookRadius, true);
+
                 if($nearest !== null) {
                     $entity->lookAt($nearest->getEyePos());
+                } else {
+                    $entity->resetRotation((float)($data["yaw"] ?? 0.0), (float)($data["pitch"] ?? 0.0));
                 }
             }
         }
     }
 
+    private function canBeLookedAt(Player $player): bool {
+        if(!$player->isAlive() || !$player->isConnected()) return false;
+        if($player->isSpectator()) return false;
+
+        return true;
+    }
+
     private function isValidTarget(Player $player): bool {
         $config = Main::getInstance()->getConfig();
 
-        if(!$player->isAlive() || !$player->isConnected()) return false;
+        if(!$this->canBeLookedAt($player)) return false;
         if($player->hasPermission("customnpc.ignored")) return false;
         if((bool)$config->getNested("behavior.ignore-spectator", true) && $player->isSpectator()) return false;
         if((bool)$config->getNested("behavior.ignore-creative", true) && $player->isCreative()) return false;
@@ -72,12 +82,16 @@ class NPCBehaviorTask extends Task {
         return true;
     }
 
-    private function findNearestViewer(NPCEntity $entity, float $radius): ?Player {
+    private function findNearestViewer(NPCEntity $entity, float $radius, bool $forLook = false): ?Player {
         $best = null;
         $bestDistance = $radius;
 
         foreach($entity->getViewers() as $player) {
-            if(!$this->isValidTarget($player)) continue;
+            if($forLook) {
+                if(!$this->canBeLookedAt($player)) continue;
+            } elseif(!$this->isValidTarget($player)) {
+                continue;
+            }
 
             $distance = $entity->getPosition()->distance($player->getPosition());
             if($distance < $bestDistance) {

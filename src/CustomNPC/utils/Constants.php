@@ -39,6 +39,14 @@ class Constants {
         "enderman" => "Enderman"
     ];
 
+    public const MODEL_STEVE = "steve";
+    public const MODEL_ALEX = "alex";
+
+    public const SKIN_MODELS = [
+        self::MODEL_STEVE => "Steve (bras larges)",
+        self::MODEL_ALEX => "Alex (bras fins)"
+    ];
+
     public const DEFAULT_POSE = "none";
 
     public const POSES = [
@@ -46,8 +54,19 @@ class Constants {
         "zombie" => "Bras tendus",
         "assis" => "Assis",
         "couche" => "Couche",
+        "calin" => "Calin",
         "bras_croises" => "Bras croises",
-        "salut" => "Salut"
+        "salut_droite" => "Salut droite",
+        "salut_gauche" => "Salut gauche"
+    ];
+
+    public const POSE_ALIASES = [
+        "salut" => "salut_droite",
+        "salut_droit" => "salut_droite",
+        "salut_gauch" => "salut_gauche",
+        "couche_" => "couche",
+        "bras_croise" => "bras_croises",
+        "calin_" => "calin"
     ];
 
     public const NAMETAG_ALWAYS = "always";

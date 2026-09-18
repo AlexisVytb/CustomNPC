@@ -2,7 +2,7 @@
 
 namespace CustomNPC\gui;
 
-use jojoe77777\FormAPI\SimpleForm;
+use CustomNPC\form\SimpleForm;
 use pocketmine\player\Player;
 use CustomNPC\manager\NPCManager;
 

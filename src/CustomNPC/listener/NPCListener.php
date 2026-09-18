@@ -29,8 +29,10 @@ use CustomNPC\manager\VisibilityManager;
 use CustomNPC\Main;
 use CustomNPC\manager\NPCManager;
 use CustomNPC\task\RespawnTask;
+use CustomNPC\utils\Compat;
 use CustomNPC\utils\Constants;
 use CustomNPC\utils\ItemParser;
+use CustomNPC\utils\Messages;
 
 class NPCListener implements Listener {
 
@@ -139,16 +141,23 @@ class NPCListener implements Listener {
         $plugin = Main::getInstance();
         $runner = $plugin->getDialogueRunner();
         $usedTree = false;
+        $finishedAt = 0;
 
         if($runner->hasTree($uuid)) {
             $runner->start($player, $uuid);
             $usedTree = true;
         } elseif($data["dialogueEnabled"] ?? false) {
-            $this->playDialogue($player, $uuid, $data);
+            $finishedAt = $this->playDialogue($player, $uuid, $data);
         }
 
         if(!$usedTree && ($data["shop"]["enabled"] ?? false)) {
-            (new ShopGUI($this->npcManager, $plugin->getShopManager()))->open($player, $uuid);
+            $delay = $finishedAt > 0 ? $finishedAt + max(5, (int)($data["dialogueDelay"] ?? 20)) : 5;
+
+            $plugin->getScheduler()->scheduleDelayedTask(new ClosureTask(function() use ($player, $uuid, $plugin): void {
+                if($player->isConnected()) {
+                    (new ShopGUI($this->npcManager, $plugin->getShopManager()))->open($player, $uuid);
+                }
+            }), $delay);
         }
 
         if($data["commandEnabled"] ?? false) {
@@ -157,44 +166,36 @@ class NPCListener implements Listener {
     }
 
     private function playInteractSound(Player $player, array $data): void {
-        $sound = (string)($data["interactSound"] ?? "");
-        if($sound === "") return;
-
-        $player->getNetworkSession()->sendDataPacket(
-            \pocketmine\network\mcpe\protocol\PlaySoundPacket::create(
-                $sound,
-                $player->getPosition()->x,
-                $player->getPosition()->y,
-                $player->getPosition()->z,
-                1.0,
-                1.0
-            )
-        );
+        Compat::playSound($player, (string)($data["interactSound"] ?? ""), $player->getPosition()->asVector3());
     }
 
-    private function playDialogue(Player $player, string $uuid, array $data): void {
+    private function playDialogue(Player $player, string $uuid, array $data): int {
         $lines = $data["dialogue"] ?? [];
-        if(empty($lines)) return;
+        if(!is_array($lines) || empty($lines)) return 0;
 
         $delay = max(1, (int)($data["dialogueDelay"] ?? 20));
-        $prefix = "§e" . $this->npcManager->applyPlaceholders((string)($data["title"] ?? "NPC"), $uuid) . "§r §7> §f";
+        $npcName = $this->npcManager->applyPlaceholders((string)($data["title"] ?? "NPC"), $uuid);
         $scheduler = Main::getInstance()->getScheduler();
 
         $index = 0;
+
         foreach($lines as $line) {
             if(!is_string($line) || trim($line) === "") continue;
 
             $text = str_replace("{player}", $player->getName(), $line);
             $text = $this->npcManager->applyPlaceholders($text, $uuid);
+            $message = Messages::get("dialogue.format", ["npc" => $npcName, "line" => $text]);
 
-            $scheduler->scheduleDelayedTask(new ClosureTask(function() use ($player, $prefix, $text): void {
+            $scheduler->scheduleDelayedTask(new ClosureTask(function() use ($player, $message): void {
                 if($player->isConnected()) {
-                    $player->sendMessage($prefix . $text);
+                    $player->sendMessage($message);
                 }
             }), $index * $delay);
 
             $index++;
         }
+
+        return $index > 0 ? ($index - 1) * $delay : 0;
     }
 
     private function executeCommands(Player $player, string $uuid, array $data): void {
@@ -256,9 +257,9 @@ class NPCListener implements Listener {
 
             try {
                 if($executor === "player") {
-                    Server::getInstance()->dispatchCommand($player, $command);
+                    Compat::dispatch($player, $command);
                 } else {
-                    Server::getInstance()->dispatchCommand(Server::getInstance()->getConsoleSender(), $command);
+                    Compat::dispatchConsole($command);
                 }
             } catch(\Throwable $e) {
                 Main::getInstance()->getLogger()->error("Erreur commande NPC : " . $e->getMessage());

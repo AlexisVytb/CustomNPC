@@ -4,7 +4,8 @@ namespace CustomNPC\manager;
 
 use pocketmine\item\Item;
 use pocketmine\player\Player;
-use pocketmine\Server;
+use CustomNPC\Main;
+use CustomNPC\utils\Compat;
 use CustomNPC\utils\ItemParser;
 use CustomNPC\utils\Messages;
 
@@ -256,11 +257,10 @@ class ShopManager {
     }
 
     private function dispatch(Player $player, string $command): void {
-        $command = ltrim(str_replace("{player}", $player->getName(), $command), "/");
+        $command = str_replace("{player}", $player->getName(), $command);
 
-        try {
-            Server::getInstance()->dispatchCommand(Server::getInstance()->getConsoleSender(), $command);
-        } catch(\Throwable $e) {
+        if(!Compat::dispatchConsole($command)) {
+            Main::getInstance()->getLogger()->warning("Commande de boutique refusee ou inconnue : " . $command);
         }
     }
 

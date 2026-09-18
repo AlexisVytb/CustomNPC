@@ -75,6 +75,17 @@ class NPCEntity extends Human {
         $this->broadcastMovement();
     }
 
+    public function resetRotation(float $yaw, float $pitch): void {
+        $pitch = max(-90.0, min(90.0, $pitch));
+
+        if(abs($this->headYaw - $yaw) < 0.5 && abs($this->location->pitch - $pitch) < 0.5) return;
+
+        $this->location->yaw = $yaw;
+        $this->location->pitch = $pitch;
+        $this->headYaw = $yaw;
+        $this->broadcastMovement();
+    }
+
     public function lookAt(Vector3 $target): void {
         $dx = $target->x - $this->location->x;
         $dy = $target->y - ($this->location->y + $this->getEyeHeight());

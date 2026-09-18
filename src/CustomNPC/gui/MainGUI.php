@@ -2,7 +2,7 @@
 
 namespace CustomNPC\gui;
 
-use jojoe77777\FormAPI\SimpleForm;
+use CustomNPC\form\SimpleForm;
 use pocketmine\item\VanillaItems;
 use pocketmine\player\Player;
 use CustomNPC\inventory\ChestEditor;

@@ -6,7 +6,7 @@ Plugin de PNJ personnalisables pour **PocketMine-MP 5** (Minecraft Bedrock).
 
 | Dépendance | Type | Obligatoire |
 |---|---|---|
-| FormAPI (jojoe77777) | plugin | oui |
+| FormAPI (jojoe77777) | plugin | non, les formulaires sont integres au plugin |
 | InvMenu (Muqsit) | virion | non, mais recommandé |
 
 InvMenu est déclaré dans `.poggit.yml` et est intégré automatiquement à la compilation Poggit. Sans lui, les coffres d'équipement et de drops sont remplacés par des formulaires texte.

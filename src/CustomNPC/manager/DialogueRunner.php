@@ -2,13 +2,14 @@
 
 namespace CustomNPC\manager;
 
-use jojoe77777\FormAPI\SimpleForm;
+use CustomNPC\form\SimpleForm;
 use pocketmine\player\Player;
 use pocketmine\scheduler\ClosureTask;
 use pocketmine\Server;
 use pocketmine\world\Position;
 use CustomNPC\gui\ShopGUI;
 use CustomNPC\Main;
+use CustomNPC\utils\Compat;
 use CustomNPC\utils\ItemParser;
 use CustomNPC\utils\Messages;
 
@@ -115,15 +116,21 @@ class DialogueRunner {
         $delay = max(1, (int)($data["dialogueDelay"] ?? 20));
         $scheduler = Main::getInstance()->getScheduler();
 
-        $lines = array_values(array_filter($node["lines"] ?? [], 'is_string'));
+        $lines = [];
+        foreach($node["lines"] ?? [] as $line) {
+            if(!is_string($line) || trim($line) === "") continue;
+            $lines[] = $line;
+        }
+
         $index = 0;
 
         foreach($lines as $line) {
             $text = $this->format($line, $player, $uuid);
+            $message = Messages::get("dialogue.format", ["npc" => $npcName, "line" => $text]);
 
-            $scheduler->scheduleDelayedTask(new ClosureTask(function() use ($player, $npcName, $text): void {
+            $scheduler->scheduleDelayedTask(new ClosureTask(function() use ($player, $message): void {
                 if($player->isConnected()) {
-                    $player->sendMessage(Messages::get("dialogue.format", ["npc" => $npcName, "line" => $text]));
+                    $player->sendMessage($message);
                 }
             }), $index * $delay);
 
@@ -144,6 +151,9 @@ class DialogueRunner {
 
         if(empty($choices)) return;
 
+        $formDelay = count($lines) > 0 ? ((count($lines) - 1) * $delay) + $delay : 5;
+        $formDelay = max(5, $formDelay);
+
         $scheduler->scheduleDelayedTask(new ClosureTask(function() use ($player, $uuid, $npcName, $choices, $lines): void {
             if(!$player->isConnected()) return;
 
@@ -154,18 +164,16 @@ class DialogueRunner {
             });
 
             $form->setTitle("§6" . $npcName);
-            $form->setContent(empty($lines) ? "§7..." : "§f" . $this->stripColorNoise(end($lines)));
+
+            $last = empty($lines) ? "" : (string)end($lines);
+            $form->setContent($last === "" ? "§7..." : "§f" . $this->format($last, $player, $uuid));
 
             foreach($choices as $choice) {
                 $form->addButton("§f" . $choice["text"]);
             }
 
             $player->sendForm($form);
-        }), max(1, count($lines)) * $delay);
-    }
-
-    private function stripColorNoise(string $line): string {
-        return $line;
+        }), $formDelay);
     }
 
     private function format(string $line, Player $player, string $uuid): string {
@@ -183,15 +191,19 @@ class DialogueRunner {
                 break;
 
             case self::ACTION_COMMAND:
-                Server::getInstance()->dispatchCommand($player, ltrim($value, "/"));
+                Compat::dispatch($player, $value);
                 break;
 
             case self::ACTION_CONSOLE:
-                Server::getInstance()->dispatchCommand(Server::getInstance()->getConsoleSender(), ltrim($value, "/"));
+                Compat::dispatchConsole($value);
                 break;
 
             case self::ACTION_SHOP:
-                (new ShopGUI($this->npcManager, $this->shopManager))->open($player, $uuid);
+                Main::getInstance()->getScheduler()->scheduleDelayedTask(new ClosureTask(function() use ($player, $uuid): void {
+                    if($player->isConnected()) {
+                        (new ShopGUI($this->npcManager, $this->shopManager))->open($player, $uuid, true);
+                    }
+                }), 5);
                 break;
 
             case self::ACTION_TELEPORT:

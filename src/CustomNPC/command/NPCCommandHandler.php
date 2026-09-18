@@ -18,6 +18,7 @@ use CustomNPC\gui\NPCListGUI;
 use CustomNPC\inventory\ChestEditor;
 use CustomNPC\Main;
 use CustomNPC\manager\NPCManager;
+use CustomNPC\manager\SkinManager;
 use CustomNPC\utils\Constants;
 use CustomNPC\utils\Messages;
 
@@ -42,6 +43,10 @@ class NPCCommandHandler {
         "drops" => "customnpc.drops",
         "skin" => "customnpc.skin",
         "listskins" => "customnpc.skin",
+        "skinlist" => "customnpc.skin",
+        "skins" => "customnpc.skin",
+        "skinmodel" => "customnpc.skin",
+        "model" => "customnpc.skin",
         "race" => "customnpc.race",
         "listraces" => "customnpc.race",
         "pose" => "customnpc.pose",
@@ -110,7 +115,8 @@ class NPCCommandHandler {
             "armor" => $this->armor($player, $rest),
             "drops" => $this->drops($player, $rest),
             "skin" => $this->skin($player, $rest),
-            "listskins" => $this->listSkins($player),
+            "listskins", "skinlist", "skins" => $this->listSkins($player),
+            "skinmodel", "model" => $this->skinModel($player, $rest),
             "race" => $this->race($player, $rest),
             "listraces" => $this->listRaces($player),
             "pose" => $this->pose($player, $rest),
@@ -181,7 +187,10 @@ class NPCCommandHandler {
         $player->sendMessage("§b/npc waypoint <add|list|remove|clear|start|stop> §7- patrouille");
         $player->sendMessage("§b/npc visibility §7- qui voit le NPC");
         $player->sendMessage("§b/npc logs [nombre] §7- historique des modifications");
-        $player->sendMessage("§b/npc skin|race|pose §7- apparence");
+        $player->sendMessage("§b/npc skin <fichier.png|me|player:pseudo|reset> §7- skin");
+        $player->sendMessage("§b/npc skinlist §7- lister les PNG du dossier skins");
+        $player->sendMessage("§b/npc skinmodel <steve|alex> §7- largeur des bras");
+        $player->sendMessage("§b/npc race|pose §7- apparence");
         $player->sendMessage("§b/npc tp|here|move|rotate §7- positionnement");
         $player->sendMessage("§b/npc copy §7| §b/npc paste §7- copier les reglages");
         $player->sendMessage("§b/npc list|info|refresh|reload|export|import|debug|uuid|wand|admin");
@@ -511,7 +520,8 @@ class NPCCommandHandler {
 
     private function skin(Player $player, array $args): bool {
         if(empty($args)) {
-            $player->sendMessage("§cUsage: /npc skin <player:pseudo|fichier.png|reset> [uuid]");
+            $player->sendMessage("§cUsage: /npc skin <me|player:pseudo|fichier.png|reset> [uuid]");
+            $player->sendMessage("§7Liste des fichiers : §e/npc skinlist");
             return true;
         }
 
@@ -521,25 +531,54 @@ class NPCCommandHandler {
 
         if(strtolower($value) === "reset") {
             $this->npcManager->resetSkin($uuid);
-            $player->sendMessage("§aSkin reinitialise.");
+            $player->sendMessage(Messages::get("skin.reset"));
             return true;
         }
 
         if(strtolower($value) === "me") {
             $this->npcManager->changeSkinFromPlayer($uuid, $player);
-            $player->sendMessage("§aTon skin a ete applique.");
+            $player->sendMessage(Messages::get("skin.applied", ["skin" => $player->getName()]));
             return true;
         }
 
-        $this->npcManager->changeSkin($uuid, $value);
-        $player->sendMessage("§aSkin applique : §e" . $value);
+        $result = $this->npcManager->changeSkin($uuid, $value);
+
+        if($result === SkinManager::RESULT_OK) {
+            $player->sendMessage(Messages::get("skin.applied", ["skin" => $value]));
+        } elseif($result === SkinManager::RESULT_INVALID) {
+            $player->sendMessage(Messages::get("skin.invalid", ["skin" => $value]));
+        } else {
+            $player->sendMessage(Messages::get("skin.not-found", ["skin" => $value]));
+        }
+
+        return true;
+    }
+
+    private function skinModel(Player $player, array $args): bool {
+        if(empty($args)) {
+            $player->sendMessage("§cUsage: /npc skinmodel <steve|alex> [uuid]");
+            return true;
+        }
+
+        $model = $this->npcManager->getModelManager()->normalizeModel($args[0]);
+
+        $uuid = $this->resolveTarget($player, $args, 1);
+        if($uuid === null) return true;
+
+        $this->npcManager->changeSkinModel($uuid, $model);
+        $player->sendMessage(Messages::get("skin.model-set", [
+            "model" => $this->npcManager->getModelManager()->getModelLabel($model)
+        ]));
+
         return true;
     }
 
     private function listSkins(Player $player): bool {
-        $skins = $this->npcManager->getSkinManager()->listAvailableSkins();
+        $skinManager = $this->npcManager->getSkinManager();
+        $skins = $skinManager->listAvailableSkins();
 
-        $player->sendMessage("§e===== Skins =====");
+        $player->sendMessage("§e===== Skins disponibles =====");
+        $player->sendMessage("§7Dossier : §8" . $skinManager->skinsFolder());
         $player->sendMessage("§7- §eme §7(ton skin)");
         $player->sendMessage("§7- §eplayer:<pseudo> §7(joueur connecte)");
         $player->sendMessage("§7- §ereset §7(skin par defaut)");
@@ -549,7 +588,9 @@ class NPCCommandHandler {
         }
 
         if(empty($skins)) {
-            $player->sendMessage("§7Aucun PNG dans le dossier §8plugin_data/CustomNPC/skins/");
+            $player->sendMessage("§cAucun PNG trouve. Depose tes fichiers 64x64 dans ce dossier.");
+        } else {
+            $player->sendMessage("§8Formats acceptes : 64x32, 64x64, 128x64, 128x128");
         }
 
         return true;

@@ -43,9 +43,11 @@ shop:
   inventory-full: "§cLibere de la place dans ton inventaire."
   purchased: "§aEchange effectue : §e{item}"
   permission-required: "§cCet echange requiert : §e{permission}"
+  admin-closed: "§cLa boutique de ce NPC est fermee. Ouvre-la dans §e/npc shop §7> §eParametres§c."
+  admin-empty: "§cAucun echange configure. Ajoute-en dans §e/npc shop§c."
 
 dialogue:
-  format: "§e{npc}§r §7> §f{line}"
+  format: "§f<§e{npc}§f> §r{line}"
   node-missing: "§cDialogue interrompu."
 
 waypoint:
@@ -59,3 +61,10 @@ command:
   cooldown: "§cEn cooldown : §e{seconds}s"
   one-time-used: "§cCommande deja utilisee."
   permission: "§cPermission requise : §e{permission}"
+
+skin:
+  applied: "§aSkin applique : §e{skin}"
+  not-found: "§cSkin introuvable : §e{skin}§c. Voir §e/npc skinlist"
+  invalid: "§cFichier PNG illisible ou dimensions invalides : §e{skin}"
+  reset: "§aSkin reinitialise."
+  model-set: "§aModele de bras : §e{model}"

@@ -65,6 +65,8 @@ class NPCManager {
         foreach($this->npcData as $uuid => $data) {
             $this->npcData[$uuid] = array_merge($this->getDefaultNPCData(0, 0, 0, ""), $data);
             $this->npcData[$uuid]["runtimeId"] = 0;
+            $this->npcData[$uuid]["pose"] = $this->modelManager->normalizePose((string)($this->npcData[$uuid]["pose"] ?? Constants::DEFAULT_POSE));
+            $this->npcData[$uuid]["skinModel"] = $this->modelManager->normalizeModel((string)($this->npcData[$uuid]["skinModel"] ?? Constants::MODEL_STEVE));
         }
 
         $this->npcUuidByEntityId = [];
@@ -293,7 +295,7 @@ class NPCManager {
         $headYaw = (float)($data["headYaw"] ?? $yaw);
 
         $race = (string)($data["race"] ?? Constants::DEFAULT_RACE);
-        $pose = (string)($data["pose"] ?? Constants::DEFAULT_POSE);
+        $pose = $this->modelManager->normalizePose((string)($data["pose"] ?? Constants::DEFAULT_POSE));
         $hitbox = $this->modelManager->getHitbox($race, $pose);
 
         $location = new Location((float)$position["x"], (float)$position["y"], (float)$position["z"], $world, $yaw, $pitch);
@@ -338,11 +340,25 @@ class NPCManager {
 
     public function buildSkin(array $data): Skin {
         $race = (string)($data["race"] ?? Constants::DEFAULT_RACE);
-        $pose = (string)($data["pose"] ?? Constants::DEFAULT_POSE);
+        $pose = $this->modelManager->normalizePose((string)($data["pose"] ?? Constants::DEFAULT_POSE));
+        $slim = $this->modelManager->isSlim($data);
 
         $texture = null;
+        $skinPath = trim((string)($data["skin"] ?? ""));
 
-        if($race !== Constants::DEFAULT_RACE && $this->raceManager->raceExists($race)) {
+        if($skinPath !== "" && !str_starts_with($skinPath, "player:")) {
+            $texture = $this->skinManager->loadTexture($skinPath);
+        }
+
+        if($texture === null) {
+            $texture = $this->skinManager->decodeTexture($data["savedSkin"] ?? null);
+        }
+
+        if($texture === null && $skinPath !== "") {
+            $texture = $this->skinManager->loadTexture($skinPath);
+        }
+
+        if($texture === null && $race !== Constants::DEFAULT_RACE && $this->raceManager->raceExists($race)) {
             $path = $this->raceManager->getTexturePath($race);
             if($path !== null) {
                 $texture = $this->skinManager->readTexture($path);
@@ -350,19 +366,11 @@ class NPCManager {
         }
 
         if($texture === null) {
-            $texture = $this->skinManager->decodeTexture($data["savedSkin"] ?? null);
-        }
-
-        if($texture === null) {
-            $texture = $this->skinManager->loadTexture((string)($data["skin"] ?? ""));
-        }
-
-        if($texture === null) {
             $texture = $this->skinManager->getDefaultTexture();
         }
 
-        $geometryName = $this->modelManager->getIdentifier($race, $pose);
-        $geometryData = $this->modelManager->buildGeometry($race, $pose);
+        $geometryName = $this->modelManager->getIdentifier($race, $pose, $slim);
+        $geometryData = $this->modelManager->buildGeometry($race, $pose, $slim);
 
         return $this->skinManager->buildSkin($texture, $geometryName, $geometryData);
     }
@@ -671,6 +679,7 @@ class NPCManager {
             "size" => 1.0,
             "skin" => "",
             "savedSkin" => null,
+            "skinModel" => Constants::MODEL_STEVE,
             "race" => Constants::DEFAULT_RACE,
             "pose" => Constants::DEFAULT_POSE,
             "commandEnabled" => false,
@@ -734,8 +743,15 @@ class NPCManager {
     public function changeSkinFromPlayer(string $uuid, Player $source): bool {
         if(!isset($this->npcData[$uuid])) return false;
 
-        $this->npcData[$uuid]["savedSkin"] = $this->skinManager->encodeSkin($source->getSkin());
+        $skin = $source->getSkin();
+
+        $this->npcData[$uuid]["savedSkin"] = $this->skinManager->encodeSkin($skin);
         $this->npcData[$uuid]["skin"] = "player:" . $source->getName();
+
+        if(str_contains(strtolower($skin->getGeometryName()), "slim")) {
+            $this->npcData[$uuid]["skinModel"] = Constants::MODEL_ALEX;
+        }
+
         $this->markDirty($uuid);
 
         $this->updateNPC($uuid);
@@ -743,19 +759,41 @@ class NPCManager {
         return true;
     }
 
-    public function changeSkin(string $uuid, string $skinPath): bool {
-        if(!isset($this->npcData[$uuid])) return false;
+    public function changeSkin(string $uuid, string $skinPath): string {
+        if(!isset($this->npcData[$uuid])) return SkinManager::RESULT_NOT_FOUND;
 
-        $this->npcData[$uuid]["skin"] = $skinPath;
-        $this->npcData[$uuid]["savedSkin"] = null;
+        $skinPath = trim($skinPath);
 
         if(str_starts_with($skinPath, "player:")) {
             $target = $this->plugin->getServer()->getPlayerByPrefix(substr($skinPath, 7));
-            if($target !== null) {
-                $this->npcData[$uuid]["savedSkin"] = $this->skinManager->encodeSkin($target->getSkin());
-            }
+            if($target === null) return SkinManager::RESULT_NOT_FOUND;
+
+            $this->npcData[$uuid]["skin"] = $skinPath;
+            $this->npcData[$uuid]["savedSkin"] = $this->skinManager->encodeSkin($target->getSkin());
+
+            $this->updateNPC($uuid);
+            $this->saveNPC($uuid);
+            return SkinManager::RESULT_OK;
         }
 
+        $file = $this->skinManager->resolveFile($skinPath);
+        if($file === null) return SkinManager::RESULT_NOT_FOUND;
+
+        $texture = $this->skinManager->readTexture($file);
+        if($texture === null) return SkinManager::RESULT_INVALID;
+
+        $this->npcData[$uuid]["skin"] = basename($file);
+        $this->npcData[$uuid]["savedSkin"] = null;
+
+        $this->updateNPC($uuid);
+        $this->saveNPC($uuid);
+        return SkinManager::RESULT_OK;
+    }
+
+    public function changeSkinModel(string $uuid, string $model): bool {
+        if(!isset($this->npcData[$uuid])) return false;
+
+        $this->npcData[$uuid]["skinModel"] = $this->modelManager->normalizeModel($model);
         $this->updateNPC($uuid);
         $this->saveNPC($uuid);
         return true;
@@ -784,7 +822,7 @@ class NPCManager {
         if(!isset($this->npcData[$uuid])) return false;
         if(!$this->modelManager->poseExists($poseId)) return false;
 
-        $this->npcData[$uuid]["pose"] = $poseId;
+        $this->npcData[$uuid]["pose"] = $this->modelManager->normalizePose($poseId);
         $this->updateNPC($uuid);
         $this->saveNPC($uuid);
         return true;

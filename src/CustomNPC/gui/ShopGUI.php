@@ -2,8 +2,10 @@
 
 namespace CustomNPC\gui;
 
-use jojoe77777\FormAPI\SimpleForm;
 use pocketmine\player\Player;
+use pocketmine\scheduler\ClosureTask;
+use CustomNPC\form\SimpleForm;
+use CustomNPC\Main;
 use CustomNPC\manager\NPCManager;
 use CustomNPC\manager\ShopManager;
 use CustomNPC\utils\Messages;
@@ -18,17 +20,25 @@ class ShopGUI {
         $this->shopManager = $shopManager;
     }
 
-    public function open(Player $player, string $uuid): void {
+    public function open(Player $player, string $uuid, bool $force = false): void {
         $this->shopManager->refreshStock($uuid);
 
         $shop = $this->shopManager->getShop($uuid);
+        $trades = $this->shopManager->normalizeTrades($shop["trades"]);
+
+        $admin = $this->npcManager->isAdmin($player->getName()) || $player->hasPermission("customnpc.shop");
 
         if(!($shop["enabled"] ?? false)) {
-            $player->sendMessage(Messages::get("shop.closed"));
-            return;
+            if($force && $admin && !empty($trades)) {
+                $shop["enabled"] = true;
+                $this->shopManager->saveShop($uuid, $shop);
+                $player->sendMessage("§eLa boutique etait fermee, elle vient d'etre ouverte automatiquement.");
+            } else {
+                $player->sendMessage(Messages::get($admin ? "shop.admin-closed" : "shop.closed"));
+                return;
+            }
         }
 
-        $trades = $this->shopManager->normalizeTrades($shop["trades"]);
         $visible = [];
 
         foreach($trades as $trade) {
@@ -39,14 +49,16 @@ class ShopGUI {
         }
 
         if(empty($visible)) {
-            $player->sendMessage(Messages::get("shop.empty"));
+            $player->sendMessage(Messages::get($admin && empty($trades) ? "shop.admin-empty" : "shop.empty"));
             return;
         }
 
         $form = new SimpleForm(function(Player $player, $index) use ($uuid, $visible) {
             if($index === null || !isset($visible[$index])) return;
 
-            $this->confirm($player, $uuid, $visible[$index]);
+            $this->later($player, function(Player $player) use ($uuid, $visible, $index): void {
+                $this->confirm($player, $uuid, $visible[$index]);
+            });
         });
 
         $form->setTitle("§6" . ($shop["title"] ?? "Boutique"));
@@ -73,7 +85,9 @@ class ShopGUI {
                 $this->shopManager->purchase($player, $uuid, (string)$trade["id"]);
             }
 
-            $this->open($player, $uuid);
+            $this->later($player, function(Player $player) use ($uuid): void {
+                $this->open($player, $uuid);
+            });
         });
 
         $stock = (int)$trade["stock"];
@@ -91,5 +105,13 @@ class ShopGUI {
         $form->addButton("§cAnnuler");
 
         $player->sendForm($form);
+    }
+
+    private function later(Player $player, \Closure $action): void {
+        Main::getInstance()->getScheduler()->scheduleDelayedTask(new ClosureTask(function() use ($player, $action): void {
+            if($player->isConnected()) {
+                $action($player);
+            }
+        }), 5);
     }
 }

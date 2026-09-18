@@ -1,16 +1,15 @@
 name: CustomNPC
-version: 3.1.0
+version: 3.2.0
 main: CustomNPC\Main
 api: 5.0.0
 author: AlexisV
 description: Plugin de NPCs personnalisables avec IA, dialogues et animations
 
-depend: [FormAPI]
 
 commands:
   npc:
     description: Gestion des NPCs
-    usage: /npc <help|admin|wand|select|create|spawn|delete|id|list|gui|tp|here|move|rotate|armor|drops|skin|race|pose|nametag|anim|waypoint|dialogue|tree|shop|visibility|logs|info|refresh|reload|export|import|debug|fakeplayer>
+    usage: /npc <help|admin|wand|select|create|spawn|delete|id|list|gui|tp|here|move|rotate|armor|drops|skin|skinlist|skinmodel|race|pose|nametag|anim|waypoint|dialogue|tree|shop|visibility|logs|info|refresh|reload|export|import|debug|fakeplayer>
     permission: customnpc.use
     aliases: [pnj, customnpc]
   npcadmin:
