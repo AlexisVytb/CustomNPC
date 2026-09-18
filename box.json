@@ -2,6 +2,7 @@
     "chmod": "0755",
     "main": false,
     "output": "CustomNPC.phar",
-    "directories": ["src", "vendor"],
-    "files": ["plugin.yml"]
+    "directories": ["src", "resources"],
+    "files": ["plugin.yml"],
+    "compression": "GZ"
 }

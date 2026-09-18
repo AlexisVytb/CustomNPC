@@ -734,7 +734,7 @@ class NPCCommandHandler {
         $uuid = $this->resolveTarget($player, $args);
         if($uuid === null) return true;
 
-        (new DialogueTreeGUI($this->npcManager, Main::getInstance()->getDialogueRunner()))->open($player, $uuid);
+        (new DialogueTreeGUI($this->npcManager, Main::getInstance()->getDialogueRunner(), Main::getInstance()->getConditionManager()))->open($player, $uuid);
         return true;
     }
 

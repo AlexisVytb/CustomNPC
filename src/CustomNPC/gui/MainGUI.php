@@ -97,7 +97,7 @@ class MainGUI {
 
     private function openDialogueTree(Player $player, string $uuid): void {
         $plugin = \CustomNPC\Main::getInstance();
-        (new DialogueTreeGUI($this->npcManager, $plugin->getDialogueRunner()))->open($player, $uuid);
+        (new DialogueTreeGUI($this->npcManager, $plugin->getDialogueRunner(), $plugin->getConditionManager()))->open($player, $uuid);
     }
 
     private function openArmor(Player $player, string $uuid): void {

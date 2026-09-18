@@ -80,6 +80,10 @@ class Messages {
             "invalid" => "§cFichier PNG illisible ou dimensions invalides : §e{skin}",
             "reset" => "§aSkin reinitialise.",
             "model-set" => "§aModele de bras : §e{model}"
+        ],
+        "quest" => [
+            "locked" => "§7Tu ne remplis pas encore les conditions pour ca.",
+            "locked-cooldown" => "§7Reviens dans §e{seconds}s§7."
         ]
     ];
 

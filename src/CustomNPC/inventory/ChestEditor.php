@@ -2,11 +2,11 @@
 
 namespace CustomNPC\inventory;
 
-use muqsit\invmenu\InvMenu;
-use muqsit\invmenu\InvMenuHandler;
-use muqsit\invmenu\transaction\InvMenuTransaction;
-use muqsit\invmenu\transaction\InvMenuTransactionResult;
-use muqsit\invmenu\type\InvMenuTypeIds;
+use CustomNPC\libs\muqsit\invmenu\InvMenu;
+use CustomNPC\libs\muqsit\invmenu\InvMenuHandler;
+use CustomNPC\libs\muqsit\invmenu\transaction\InvMenuTransaction;
+use CustomNPC\libs\muqsit\invmenu\transaction\InvMenuTransactionResult;
+use CustomNPC\libs\muqsit\invmenu\type\InvMenuTypeIds;
 use pocketmine\inventory\Inventory;
 use pocketmine\item\VanillaItems;
 use pocketmine\player\Player;

@@ -5,6 +5,7 @@ namespace CustomNPC\gui;
 use CustomNPC\form\CustomForm;
 use CustomNPC\form\SimpleForm;
 use pocketmine\player\Player;
+use CustomNPC\manager\ConditionManager;
 use CustomNPC\manager\DialogueRunner;
 use CustomNPC\manager\NPCManager;
 
@@ -12,10 +13,12 @@ class DialogueTreeGUI {
 
     private NPCManager $npcManager;
     private DialogueRunner $runner;
+    private ConditionManager $conditionManager;
 
-    public function __construct(NPCManager $npcManager, DialogueRunner $runner) {
+    public function __construct(NPCManager $npcManager, DialogueRunner $runner, ConditionManager $conditionManager) {
         $this->npcManager = $npcManager;
         $this->runner = $runner;
+        $this->conditionManager = $conditionManager;
     }
 
     public function open(Player $player, ?string $uuid): void {
@@ -248,8 +251,10 @@ class DialogueTreeGUI {
         foreach($choices as $choice) {
             $choice = array_merge(DialogueRunner::getDefaultChoice(), is_array($choice) ? $choice : []);
             $label = DialogueRunner::ACTIONS[$choice["action"]] ?? $choice["action"];
+            $conditionCount = count(is_array($choice["conditions"]) ? $choice["conditions"] : []);
+            $badge = $conditionCount > 0 ? " §8[§d" . $conditionCount . " condition(s)§8]" : "";
 
-            $form->addButton("§f" . $choice["text"] . "\n§7" . $label . ($choice["value"] !== "" ? " §8-> " . $choice["value"] : ""));
+            $form->addButton("§f" . $choice["text"] . $badge . "\n§7" . $label . ($choice["value"] !== "" ? " §8-> " . $choice["value"] : ""));
         }
 
         $form->addButton("§cRetour");
@@ -257,14 +262,24 @@ class DialogueTreeGUI {
     }
 
     private function choiceActions(Player $player, string $uuid, string $nodeId, int $choiceIndex): void {
+        $tree = $this->runner->getTree($uuid);
+        $choices = $tree["nodes"][$nodeId]["choices"] ?? [];
+        $choice = array_merge(DialogueRunner::getDefaultChoice(), is_array($choices[$choiceIndex] ?? null) ? $choices[$choiceIndex] : []);
+        $conditionCount = count(is_array($choice["conditions"]) ? $choice["conditions"] : []);
+
         $form = new SimpleForm(function(Player $player, $index) use ($uuid, $nodeId, $choiceIndex) {
-            if($index === null || $index === 2) {
+            if($index === null || $index === 3) {
                 $this->listChoices($player, $uuid, $nodeId);
                 return;
             }
 
             if($index === 0) {
                 $this->editChoice($player, $uuid, $nodeId, $choiceIndex);
+                return;
+            }
+
+            if($index === 1) {
+                $this->listConditions($player, $uuid, $nodeId, $choiceIndex);
                 return;
             }
 
@@ -281,8 +296,185 @@ class DialogueTreeGUI {
 
         $form->setTitle("§eChoix");
         $form->addButton("§aEditer");
+        $form->addButton("§dConditions (" . $conditionCount . ")");
         $form->addButton("§cSupprimer");
         $form->addButton("§7Retour");
+
+        $player->sendForm($form);
+    }
+
+    private function listConditions(Player $player, string $uuid, string $nodeId, int $choiceIndex): void {
+        $tree = $this->runner->getTree($uuid);
+        $choices = $tree["nodes"][$nodeId]["choices"] ?? [];
+        $choice = array_merge(DialogueRunner::getDefaultChoice(), is_array($choices[$choiceIndex] ?? null) ? $choices[$choiceIndex] : []);
+        $conditions = is_array($choice["conditions"]) ? $choice["conditions"] : [];
+
+        $form = new SimpleForm(function(Player $player, $index) use ($uuid, $nodeId, $choiceIndex, $conditions) {
+            if($index === null) {
+                $this->choiceActions($player, $uuid, $nodeId, $choiceIndex);
+                return;
+            }
+
+            if($index === count($conditions)) {
+                $this->editCondition($player, $uuid, $nodeId, $choiceIndex, null);
+                return;
+            }
+
+            if($index === count($conditions) + 1) {
+                $this->lockSettings($player, $uuid, $nodeId, $choiceIndex);
+                return;
+            }
+
+            $this->conditionActions($player, $uuid, $nodeId, $choiceIndex, $index);
+        });
+
+        $form->setTitle("§dConditions");
+        $form->setContent(
+            "§7Toutes les conditions doivent etre remplies pour voir ce choix.\n" .
+            "§7La permission classique compte comme une condition en plus."
+        );
+
+        foreach($conditions as $condition) {
+            $form->addButton("§f" . $this->conditionManager->describe(is_array($condition) ? $condition : []));
+        }
+
+        $form->addButton("§aAjouter une condition");
+        $form->addButton("§eVisibilite si verrouille (" . (((bool)($choice["showWhenLocked"] ?? false)) ? "affiche" : "cache") . ")");
+
+        $player->sendForm($form);
+    }
+
+    private function conditionActions(Player $player, string $uuid, string $nodeId, int $choiceIndex, int $conditionIndex): void {
+        $form = new SimpleForm(function(Player $player, $index) use ($uuid, $nodeId, $choiceIndex, $conditionIndex) {
+            if($index === null || $index === 2) {
+                $this->listConditions($player, $uuid, $nodeId, $choiceIndex);
+                return;
+            }
+
+            if($index === 0) {
+                $this->editCondition($player, $uuid, $nodeId, $choiceIndex, $conditionIndex);
+                return;
+            }
+
+            $tree = $this->runner->getTree($uuid);
+            $choices = $tree["nodes"][$nodeId]["choices"] ?? [];
+            $choice = array_merge(DialogueRunner::getDefaultChoice(), is_array($choices[$choiceIndex] ?? null) ? $choices[$choiceIndex] : []);
+            $conditions = is_array($choice["conditions"]) ? $choice["conditions"] : [];
+
+            unset($conditions[$conditionIndex]);
+            $choice["conditions"] = array_values($conditions);
+            $choices[$choiceIndex] = $choice;
+            $tree["nodes"][$nodeId]["choices"] = $choices;
+            $this->runner->saveTree($uuid, $tree);
+
+            $player->sendMessage("§aCondition supprimee.");
+            $this->listConditions($player, $uuid, $nodeId, $choiceIndex);
+        });
+
+        $form->setTitle("§dCondition");
+        $form->addButton("§aEditer");
+        $form->addButton("§cSupprimer");
+        $form->addButton("§7Retour");
+
+        $player->sendForm($form);
+    }
+
+    private function editCondition(Player $player, string $uuid, string $nodeId, int $choiceIndex, ?int $conditionIndex): void {
+        $tree = $this->runner->getTree($uuid);
+        $choices = $tree["nodes"][$nodeId]["choices"] ?? [];
+        $choice = array_merge(DialogueRunner::getDefaultChoice(), is_array($choices[$choiceIndex] ?? null) ? $choices[$choiceIndex] : []);
+        $conditions = is_array($choice["conditions"]) ? $choice["conditions"] : [];
+
+        $condition = $conditionIndex === null
+            ? ConditionManager::getDefaultCondition()
+            : array_merge(ConditionManager::getDefaultCondition(), is_array($conditions[$conditionIndex] ?? null) ? $conditions[$conditionIndex] : []);
+
+        $typeIds = array_keys(ConditionManager::TYPES);
+        $typeIndex = array_search((string)$condition["type"], $typeIds, true);
+        if($typeIndex === false) $typeIndex = 0;
+
+        $form = new CustomForm(function(Player $player, $result) use ($uuid, $nodeId, $choiceIndex, $conditionIndex, $typeIds) {
+            if($result === null) {
+                $this->listConditions($player, $uuid, $nodeId, $choiceIndex);
+                return;
+            }
+
+            $updated = [
+                "type" => $typeIds[(int)$result[1]] ?? ConditionManager::TYPE_PERMISSION,
+                "value" => trim((string)$result[2]),
+                "key" => trim((string)$result[3])
+            ];
+
+            $tree = $this->runner->getTree($uuid);
+            $choices = $tree["nodes"][$nodeId]["choices"] ?? [];
+            $choice = array_merge(DialogueRunner::getDefaultChoice(), is_array($choices[$choiceIndex] ?? null) ? $choices[$choiceIndex] : []);
+            $conditions = is_array($choice["conditions"]) ? $choice["conditions"] : [];
+
+            if($conditionIndex === null) {
+                $conditions[] = $updated;
+            } else {
+                $conditions[$conditionIndex] = $updated;
+            }
+
+            $choice["conditions"] = array_values($conditions);
+            $choices[$choiceIndex] = $choice;
+            $tree["nodes"][$nodeId]["choices"] = $choices;
+            $this->runner->saveTree($uuid, $tree);
+
+            $player->sendMessage("§aCondition enregistree.");
+            $this->listConditions($player, $uuid, $nodeId, $choiceIndex);
+        });
+
+        $form->setTitle($conditionIndex === null ? "§aNouvelle condition" : "§eEditer la condition");
+        $form->addLabel(
+            "§7Valeur attendue selon le type :\n" .
+            "§8- Permission(s) : le noeud de permission\n" .
+            "§8- Item : diamond:0:3;emerald\n" .
+            "§8- Variable = / != / >= : la valeur a comparer (utilise le champ Cle)\n" .
+            "§8- Monde : nom exact du monde\n" .
+            "§8- Mode de jeu : survival/creative/adventure/spectator\n" .
+            "§8- Niveau XP : nombre minimum\n" .
+            "§8- Cooldown : secondes entre chaque utilisation\n" .
+            "§8- Une seule fois : laisser vide\n" .
+            "§7Le champ Cle sert d'identifiant pour Variable/Cooldown/Une seule fois. Laisse-le vide pour qu'il soit lie automatiquement a ce choix."
+        );
+        $form->addDropdown("Type", array_values(ConditionManager::TYPES), (int)$typeIndex);
+        $form->addInput("Valeur", "", (string)$condition["value"]);
+        $form->addInput("Cle (variable/cooldown, optionnel)", "quete_forgeron", (string)$condition["key"]);
+
+        $player->sendForm($form);
+    }
+
+    private function lockSettings(Player $player, string $uuid, string $nodeId, int $choiceIndex): void {
+        $tree = $this->runner->getTree($uuid);
+        $choices = $tree["nodes"][$nodeId]["choices"] ?? [];
+        $choice = array_merge(DialogueRunner::getDefaultChoice(), is_array($choices[$choiceIndex] ?? null) ? $choices[$choiceIndex] : []);
+
+        $form = new CustomForm(function(Player $player, $result) use ($uuid, $nodeId, $choiceIndex) {
+            if($result === null) {
+                $this->listConditions($player, $uuid, $nodeId, $choiceIndex);
+                return;
+            }
+
+            $tree = $this->runner->getTree($uuid);
+            $choices = $tree["nodes"][$nodeId]["choices"] ?? [];
+            $choice = array_merge(DialogueRunner::getDefaultChoice(), is_array($choices[$choiceIndex] ?? null) ? $choices[$choiceIndex] : []);
+
+            $choice["showWhenLocked"] = (bool)$result[1];
+            $choice["lockedMessage"] = trim((string)$result[2]);
+
+            $choices[$choiceIndex] = $choice;
+            $tree["nodes"][$nodeId]["choices"] = $choices;
+            $this->runner->saveTree($uuid, $tree);
+
+            $player->sendMessage("§aParametres enregistres.");
+            $this->listConditions($player, $uuid, $nodeId, $choiceIndex);
+        });
+
+        $form->setTitle("§eVisibilite si verrouille");
+        $form->addLabel("§7Si active, le choix reste visible avec un cadenas quand une condition echoue, au lieu d'etre cache.");
+        $form->addToggle("Afficher le choix verrouille", (bool)($choice["showWhenLocked"] ?? false));
+        $form->addInput("Message si verrouille (optionnel)", "Reviens quand tu auras 10 pierres.", (string)($choice["lockedMessage"] ?? ""));
 
         $player->sendForm($form);
     }
@@ -314,15 +506,19 @@ class DialogueTreeGUI {
                 return;
             }
 
-            $updated = [
+            $tree = $this->runner->getTree($uuid);
+            $choices = $tree["nodes"][$nodeId]["choices"] ?? [];
+
+            $existing = $choiceIndex === null
+                ? DialogueRunner::getDefaultChoice()
+                : array_merge(DialogueRunner::getDefaultChoice(), is_array($choices[$choiceIndex] ?? null) ? $choices[$choiceIndex] : []);
+
+            $updated = array_merge($existing, [
                 "text" => $text,
                 "action" => $actionIds[(int)$result[2]] ?? DialogueRunner::ACTION_CLOSE,
                 "value" => trim((string)$result[3]),
                 "permission" => trim((string)$result[4])
-            ];
-
-            $tree = $this->runner->getTree($uuid);
-            $choices = $tree["nodes"][$nodeId]["choices"] ?? [];
+            ]);
 
             if($choiceIndex === null) {
                 $choices[] = $updated;
@@ -343,9 +539,13 @@ class DialogueTreeGUI {
             "§8- Noeud : identifiant du noeud (" . implode(", ", $nodeIds) . ")\n" .
             "§8- Commande : la commande sans le /\n" .
             "§8- Teleporter : x y z [monde]\n" .
-            "§8- Donner : diamond:0:3;emerald\n" .
+            "§8- Donner / Retirer : diamond:0:3;emerald\n" .
+            "§8- Definir une variable : cle=valeur\n" .
+            "§8- Ajouter a une variable : cle=nombre (defaut 1)\n" .
+            "§8- Supprimer une variable : cle\n" .
             "§8- Message : le texte a envoyer\n" .
-            "§8- Boutique et Fermer : laisser vide"
+            "§8- Boutique et Fermer : laisser vide\n" .
+            "§7Les conditions se configurent depuis le menu Choix > Conditions."
         );
         $form->addInput("Texte du bouton", "Voir la boutique", (string)$choice["text"]);
         $form->addDropdown("Action", array_values(DialogueRunner::ACTIONS), (int)$actionIndex);

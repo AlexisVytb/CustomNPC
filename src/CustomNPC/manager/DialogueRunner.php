@@ -21,6 +21,10 @@ class DialogueRunner {
     public const ACTION_SHOP = "shop";
     public const ACTION_TELEPORT = "teleport";
     public const ACTION_GIVE = "give";
+    public const ACTION_TAKE = "take";
+    public const ACTION_FLAG_SET = "flag_set";
+    public const ACTION_FLAG_ADD = "flag_add";
+    public const ACTION_FLAG_CLEAR = "flag_clear";
     public const ACTION_MESSAGE = "message";
     public const ACTION_CLOSE = "close";
 
@@ -31,16 +35,24 @@ class DialogueRunner {
         self::ACTION_SHOP => "Ouvrir la boutique",
         self::ACTION_TELEPORT => "Teleporter",
         self::ACTION_GIVE => "Donner des items",
+        self::ACTION_TAKE => "Retirer des items",
+        self::ACTION_FLAG_SET => "Definir une variable",
+        self::ACTION_FLAG_ADD => "Ajouter a une variable",
+        self::ACTION_FLAG_CLEAR => "Supprimer une variable",
         self::ACTION_MESSAGE => "Message",
         self::ACTION_CLOSE => "Fermer"
     ];
 
     private NPCManager $npcManager;
     private ShopManager $shopManager;
+    private ConditionManager $conditionManager;
+    private PlayerDataManager $playerData;
 
-    public function __construct(NPCManager $npcManager, ShopManager $shopManager) {
+    public function __construct(NPCManager $npcManager, ShopManager $shopManager, ConditionManager $conditionManager, PlayerDataManager $playerData) {
         $this->npcManager = $npcManager;
         $this->shopManager = $shopManager;
+        $this->conditionManager = $conditionManager;
+        $this->playerData = $playerData;
     }
 
     public static function getDefaultTree(): array {
@@ -58,10 +70,14 @@ class DialogueRunner {
 
     public static function getDefaultChoice(): array {
         return [
+            "id" => "",
             "text" => "Continuer",
             "action" => self::ACTION_CLOSE,
             "value" => "",
-            "permission" => ""
+            "permission" => "",
+            "conditions" => [],
+            "showWhenLocked" => false,
+            "lockedMessage" => ""
         ];
     }
 
@@ -80,6 +96,19 @@ class DialogueRunner {
     }
 
     public function saveTree(string $uuid, array $tree): void {
+        foreach($tree["nodes"] as &$node) {
+            if(!is_array($node) || !isset($node["choices"]) || !is_array($node["choices"])) continue;
+
+            foreach($node["choices"] as &$choice) {
+                if(!is_array($choice)) continue;
+                if(trim((string)($choice["id"] ?? "")) === "") {
+                    $choice["id"] = uniqid("choice_", true);
+                }
+            }
+            unset($choice);
+        }
+        unset($node);
+
         $this->npcManager->updateNPCData($uuid, ["dialogueTree" => $tree]);
         $this->npcManager->saveNPC($uuid);
     }
@@ -137,30 +166,49 @@ class DialogueRunner {
             $index++;
         }
 
-        $choices = [];
+        $visible = [];
+        $locked = [];
+
         foreach($node["choices"] ?? [] as $choice) {
             if(!is_array($choice)) continue;
 
             $choice = array_merge(self::getDefaultChoice(), $choice);
+            $trackingId = $this->trackingId($uuid, $nodeId, $choice);
+
             $permission = trim((string)$choice["permission"]);
+            $permissionOk = $permission === "" || $player->hasPermission($permission);
+            $conditionsOk = $permissionOk && $this->conditionManager->evaluateAll($player, is_array($choice["conditions"]) ? $choice["conditions"] : [], $trackingId);
 
-            if($permission !== "" && !$player->hasPermission($permission)) continue;
-
-            $choices[] = $choice;
+            if($conditionsOk) {
+                $visible[] = $choice;
+            } elseif((bool)($choice["showWhenLocked"] ?? false)) {
+                $locked[] = $choice;
+            }
         }
 
-        if(empty($choices)) return;
+        if(empty($visible) && empty($locked)) return;
 
         $formDelay = count($lines) > 0 ? ((count($lines) - 1) * $delay) + $delay : 5;
         $formDelay = max(5, $formDelay);
 
-        $scheduler->scheduleDelayedTask(new ClosureTask(function() use ($player, $uuid, $npcName, $choices, $lines): void {
+        $scheduler->scheduleDelayedTask(new ClosureTask(function() use ($player, $uuid, $nodeId, $npcName, $visible, $locked, $lines): void {
             if(!$player->isConnected()) return;
 
-            $form = new SimpleForm(function(Player $player, $index) use ($uuid, $choices) {
-                if($index === null || !isset($choices[$index])) return;
+            $entries = [];
+            foreach($visible as $choice) $entries[] = ["choice" => $choice, "locked" => false];
+            foreach($locked as $choice) $entries[] = ["choice" => $choice, "locked" => true];
 
-                $this->execute($player, $uuid, $choices[$index]);
+            $form = new SimpleForm(function(Player $player, $index) use ($uuid, $nodeId, $entries) {
+                if($index === null || !isset($entries[$index])) return;
+
+                $entry = $entries[$index];
+
+                if($entry["locked"]) {
+                    $this->sendLockedMessage($player, $uuid, $nodeId, $entry["choice"]);
+                    return;
+                }
+
+                $this->execute($player, $uuid, $entry["choice"], $nodeId);
             });
 
             $form->setTitle("§6" . $npcName);
@@ -168,12 +216,41 @@ class DialogueRunner {
             $last = empty($lines) ? "" : (string)end($lines);
             $form->setContent($last === "" ? "§7..." : "§f" . $this->format($last, $player, $uuid));
 
-            foreach($choices as $choice) {
-                $form->addButton("§f" . $choice["text"]);
+            foreach($entries as $entry) {
+                $prefix = $entry["locked"] ? "§8🔒 §7" : "§f";
+                $form->addButton($prefix . $entry["choice"]["text"]);
             }
 
             $player->sendForm($form);
         }), $formDelay);
+    }
+
+    private function trackingId(string $uuid, string $nodeId, array $choice): string {
+        $id = trim((string)($choice["id"] ?? ""));
+        if($id !== "") return $uuid . ":" . $id;
+
+        return $uuid . ":" . $nodeId . ":" . md5((string)($choice["text"] ?? ""));
+    }
+
+    private function sendLockedMessage(Player $player, string $uuid, string $nodeId, array $choice): void {
+        $custom = trim((string)($choice["lockedMessage"] ?? ""));
+
+        if($custom !== "") {
+            $player->sendMessage($this->format($custom, $player, $uuid));
+            return;
+        }
+
+        $trackingId = $this->trackingId($uuid, $nodeId, $choice);
+        $conditions = is_array($choice["conditions"]) ? $choice["conditions"] : [];
+        $failure = $this->conditionManager->findFailure($player, $conditions, $trackingId);
+
+        if($failure !== null && ($failure["type"] ?? "") === ConditionManager::TYPE_COOLDOWN) {
+            $remaining = $this->conditionManager->cooldownRemaining($player, $failure, $trackingId);
+            $player->sendMessage(Messages::get("quest.locked-cooldown", ["seconds" => (string)$remaining]));
+            return;
+        }
+
+        $player->sendMessage(Messages::get("quest.locked"));
     }
 
     private function format(string $line, Player $player, string $uuid): string {
@@ -181,9 +258,13 @@ class DialogueRunner {
         return $this->npcManager->applyPlaceholders($line, $uuid);
     }
 
-    public function execute(Player $player, string $uuid, array $choice): void {
+    public function execute(Player $player, string $uuid, array $choice, string $nodeId = ""): void {
+        $choice = array_merge(self::getDefaultChoice(), $choice);
         $action = (string)($choice["action"] ?? self::ACTION_CLOSE);
         $value = $this->format((string)($choice["value"] ?? ""), $player, $uuid);
+
+        $trackingId = $this->trackingId($uuid, $nodeId, $choice);
+        $this->conditionManager->markUsed($player, is_array($choice["conditions"]) ? $choice["conditions"] : [], $trackingId);
 
         switch($action) {
             case self::ACTION_NODE:
@@ -214,10 +295,48 @@ class DialogueRunner {
                 $this->give($player, $value);
                 break;
 
+            case self::ACTION_TAKE:
+                $this->take($player, $value);
+                break;
+
+            case self::ACTION_FLAG_SET:
+                $this->setFlag($player, $value);
+                break;
+
+            case self::ACTION_FLAG_ADD:
+                $this->addFlag($player, $value);
+                break;
+
+            case self::ACTION_FLAG_CLEAR:
+                if(trim($value) !== "") {
+                    $this->playerData->deleteFlag($player->getName(), trim($value));
+                }
+                break;
+
             case self::ACTION_MESSAGE:
                 $player->sendMessage($value);
                 break;
         }
+    }
+
+    private function setFlag(Player $player, string $value): void {
+        $pos = strpos($value, "=");
+        if($pos === false) return;
+
+        $key = trim(substr($value, 0, $pos));
+        $flagValue = trim(substr($value, $pos + 1));
+        if($key === "") return;
+
+        $this->playerData->setFlag($player->getName(), $key, $flagValue);
+    }
+
+    private function addFlag(Player $player, string $value): void {
+        $pos = strpos($value, "=");
+        $key = $pos === false ? trim($value) : trim(substr($value, 0, $pos));
+        $amount = $pos === false ? 1.0 : (float)trim(substr($value, $pos + 1));
+        if($key === "") return;
+
+        $this->playerData->increment($player->getName(), $key, $amount);
     }
 
     private function teleport(Player $player, string $value): void {
@@ -256,6 +375,20 @@ class DialogueRunner {
                 $player->getInventory()->addItem($item);
             } else {
                 $player->getWorld()->dropItem($player->getPosition(), $item);
+            }
+        }
+    }
+
+    private function take(Player $player, string $value): void {
+        foreach(explode(";", $value) as $entry) {
+            $entry = trim($entry);
+            if($entry === "") continue;
+
+            $item = ItemParser::parse($entry);
+            if($item === null) continue;
+
+            if($player->getInventory()->contains($item)) {
+                $player->getInventory()->removeItem($item);
             }
         }
     }

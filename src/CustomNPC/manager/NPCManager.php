@@ -6,6 +6,7 @@ use pocketmine\entity\Location;
 use pocketmine\entity\Living;
 use pocketmine\entity\Skin;
 use pocketmine\nbt\tag\CompoundTag;
+use pocketmine\scheduler\ClosureTask;
 use pocketmine\network\mcpe\protocol\SetActorDataPacket;
 use pocketmine\network\mcpe\protocol\types\entity\EntityMetadataProperties;
 use pocketmine\network\mcpe\protocol\types\entity\PropertySyncData;
@@ -397,8 +398,27 @@ class NPCManager {
         $inventory->setChestplate($chestplate ?? ItemParser::air());
         $inventory->setLeggings($leggings ?? ItemParser::air());
         $inventory->setBoots($boots ?? ItemParser::air());
-        $entity->getInventory()->setItemInHand($hand ?? ItemParser::air());
-        $entity->getOffHandInventory()->setItem(0, $offhand ?? ItemParser::air());
+
+        $handItem = $hand ?? ItemParser::air();
+        $offhandItem = $offhand ?? ItemParser::air();
+
+        $entity->getInventory()->setItemInHand($handItem);
+        $entity->getOffHandInventory()->setItem(0, $offhandItem);
+
+        $entityId = $entity->getId();
+        $world = $entity->getWorld();
+
+        foreach([3, 10] as $delay) {
+            $this->plugin->getScheduler()->scheduleDelayedTask(new ClosureTask(function() use ($entityId, $world, $handItem, $offhandItem): void {
+                if(!$world->isLoaded()) return;
+
+                $entity = $world->getEntity($entityId);
+                if(!($entity instanceof NPCEntity) || $entity->isClosed() || empty($entity->getViewers())) return;
+
+                $entity->getInventory()->setItemInHand(clone $handItem);
+                $entity->getOffHandInventory()->setItem(0, clone $offhandItem);
+            }), $delay);
+        }
     }
 
     public function buildNameTag(string $uuid, bool $adminView = false): string {

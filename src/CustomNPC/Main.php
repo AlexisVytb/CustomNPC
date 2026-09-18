@@ -2,7 +2,7 @@
 
 namespace CustomNPC;
 
-use muqsit\invmenu\InvMenuHandler;
+use CustomNPC\libs\muqsit\invmenu\InvMenuHandler;
 use pocketmine\command\Command;
 use pocketmine\command\CommandSender;
 use pocketmine\entity\EntityDataHelper;
@@ -13,12 +13,15 @@ use pocketmine\player\Player;
 use pocketmine\plugin\PluginBase;
 use pocketmine\world\World;
 use CustomNPC\command\NPCCommandHandler;
+use CustomNPC\command\NPCFlagCommand;
 use CustomNPC\entity\NPCEntity;
 use CustomNPC\listener\NPCListener;
+use CustomNPC\manager\ConditionManager;
 use CustomNPC\manager\DatabaseManager;
 use CustomNPC\manager\DialogueRunner;
 use CustomNPC\manager\LogManager;
 use CustomNPC\manager\NPCManager;
+use CustomNPC\manager\PlayerDataManager;
 use CustomNPC\manager\ShopManager;
 use CustomNPC\task\AnimationTask;
 use CustomNPC\task\AutoSaveTask;
@@ -39,6 +42,8 @@ class Main extends PluginBase {
     private ShopManager $shopManager;
     private DialogueRunner $dialogueRunner;
     private LogManager $logManager;
+    private PlayerDataManager $playerDataManager;
+    private ConditionManager $conditionManager;
 
     public function onEnable(): void {
         self::$instance = $this;
@@ -61,7 +66,9 @@ class Main extends PluginBase {
         $this->databaseManager = new DatabaseManager($this);
         $this->npcManager = new NPCManager($this, $this->databaseManager);
         $this->shopManager = new ShopManager($this->npcManager);
-        $this->dialogueRunner = new DialogueRunner($this->npcManager, $this->shopManager);
+        $this->playerDataManager = new PlayerDataManager($this, $this->databaseManager);
+        $this->conditionManager = new ConditionManager($this->playerDataManager);
+        $this->dialogueRunner = new DialogueRunner($this->npcManager, $this->shopManager, $this->conditionManager, $this->playerDataManager);
         $this->logManager = new LogManager($this, $this->databaseManager);
         $this->commandHandler = new NPCCommandHandler($this->npcManager);
 
@@ -80,6 +87,7 @@ class Main extends PluginBase {
         $this->getScheduler()->scheduleRepeatingTask(new AutoSaveTask($this->npcManager), $interval * 20);
 
         $this->getServer()->getCommandMap()->register("customnpc", new \CustomNPC\command\SudoCommand());
+        $this->getServer()->getCommandMap()->register("customnpc", new NPCFlagCommand($this->playerDataManager));
 
         $this->getLogger()->info("CustomNPC actif (" . strtoupper($this->databaseManager->getDatabaseType()) . ")");
     }
@@ -156,5 +164,13 @@ class Main extends PluginBase {
 
     public function getDatabaseManager(): DatabaseManager {
         return $this->databaseManager;
+    }
+
+    public function getPlayerDataManager(): PlayerDataManager {
+        return $this->playerDataManager;
+    }
+
+    public function getConditionManager(): ConditionManager {
+        return $this->conditionManager;
     }
 }

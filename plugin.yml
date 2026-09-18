@@ -1,5 +1,5 @@
 name: CustomNPC
-version: 3.2.0
+version: 3.3.0
 main: CustomNPC\Main
 api: 5.0.0
 author: AlexisV
@@ -19,6 +19,10 @@ commands:
     description: Executer une action a la place d'un joueur
     usage: /sudo <joueur> <action>
     permission: customnpc.sudo
+  npcflag:
+    description: Lire ou modifier une variable de quete d'un joueur
+    usage: /npcflag <joueur> <get|set|add|clear|list> [cle] [valeur]
+    permission: customnpc.flag
 
 permissions:
   customnpc.use:
@@ -102,6 +106,9 @@ permissions:
   customnpc.sudo.exempt:
     description: Ne peut pas etre cible par /sudo
     default: false
+  customnpc.flag:
+    description: Lire et modifier les variables de quete des joueurs
+    default: op
   customnpc.ignored:
     description: Ignore par les NPCs agressifs
     default: false

@@ -378,6 +378,142 @@ class DatabaseManager {
         }
     }
 
+    public function initPlayerFlagsTable(): void {
+        if($this->type === "sqlite") {
+            $this->database->exec("CREATE TABLE IF NOT EXISTS player_flags (
+                player TEXT NOT NULL,
+                flag_key TEXT NOT NULL,
+                flag_value TEXT,
+                updated INTEGER,
+                PRIMARY KEY (player, flag_key)
+            )");
+            $this->database->exec("CREATE INDEX IF NOT EXISTS idx_flags_player ON player_flags(player)");
+        } else {
+            $this->database->query("CREATE TABLE IF NOT EXISTS player_flags (
+                player VARCHAR(64) NOT NULL,
+                flag_key VARCHAR(191) NOT NULL,
+                flag_value TEXT,
+                updated BIGINT,
+                PRIMARY KEY (player, flag_key)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        }
+    }
+
+    public function setPlayerFlag(string $player, string $key, string $value): void {
+        $player = strtolower($player);
+
+        if($this->type === "sqlite") {
+            $stmt = $this->database->prepare("INSERT OR REPLACE INTO player_flags (player, flag_key, flag_value, updated) VALUES (:player, :key, :value, :updated)");
+            if($stmt === false) return;
+            $stmt->bindValue(":player", $player, SQLITE3_TEXT);
+            $stmt->bindValue(":key", $key, SQLITE3_TEXT);
+            $stmt->bindValue(":value", $value, SQLITE3_TEXT);
+            $stmt->bindValue(":updated", time(), SQLITE3_INTEGER);
+            $stmt->execute();
+            $stmt->close();
+        } else {
+            $stmt = $this->database->prepare("INSERT INTO player_flags (player, flag_key, flag_value, updated) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE flag_value=VALUES(flag_value), updated=VALUES(updated)");
+            if($stmt === false) return;
+            $time = time();
+            $stmt->bind_param("sssi", $player, $key, $value, $time);
+            $stmt->execute();
+            $stmt->close();
+        }
+    }
+
+    public function getPlayerFlag(string $player, string $key): ?string {
+        $player = strtolower($player);
+
+        if($this->type === "sqlite") {
+            $stmt = $this->database->prepare("SELECT flag_value FROM player_flags WHERE player = :player AND flag_key = :key");
+            if($stmt === false) return null;
+            $stmt->bindValue(":player", $player, SQLITE3_TEXT);
+            $stmt->bindValue(":key", $key, SQLITE3_TEXT);
+            $result = $stmt->execute();
+            $row = $result !== false ? $result->fetchArray(SQLITE3_ASSOC) : false;
+            $stmt->close();
+            return $row === false ? null : (string)$row["flag_value"];
+        }
+
+        $stmt = $this->database->prepare("SELECT flag_value FROM player_flags WHERE player = ? AND flag_key = ?");
+        if($stmt === false) return null;
+        $stmt->bind_param("ss", $player, $key);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $row = $result !== false ? $result->fetch_assoc() : false;
+        $stmt->close();
+        return $row === false || $row === null ? null : (string)$row["flag_value"];
+    }
+
+    public function getAllPlayerFlags(string $player): array {
+        $player = strtolower($player);
+        $flags = [];
+
+        if($this->type === "sqlite") {
+            $stmt = $this->database->prepare("SELECT flag_key, flag_value FROM player_flags WHERE player = :player");
+            if($stmt === false) return [];
+            $stmt->bindValue(":player", $player, SQLITE3_TEXT);
+            $result = $stmt->execute();
+            if($result !== false) {
+                while($row = $result->fetchArray(SQLITE3_ASSOC)) {
+                    $flags[(string)$row["flag_key"]] = (string)$row["flag_value"];
+                }
+            }
+            $stmt->close();
+            return $flags;
+        }
+
+        $stmt = $this->database->prepare("SELECT flag_key, flag_value FROM player_flags WHERE player = ?");
+        if($stmt === false) return [];
+        $stmt->bind_param("s", $player);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        if($result !== false) {
+            while($row = $result->fetch_assoc()) {
+                $flags[(string)$row["flag_key"]] = (string)$row["flag_value"];
+            }
+        }
+        $stmt->close();
+        return $flags;
+    }
+
+    public function deletePlayerFlag(string $player, string $key): void {
+        $player = strtolower($player);
+
+        if($this->type === "sqlite") {
+            $stmt = $this->database->prepare("DELETE FROM player_flags WHERE player = :player AND flag_key = :key");
+            if($stmt === false) return;
+            $stmt->bindValue(":player", $player, SQLITE3_TEXT);
+            $stmt->bindValue(":key", $key, SQLITE3_TEXT);
+            $stmt->execute();
+            $stmt->close();
+        } else {
+            $stmt = $this->database->prepare("DELETE FROM player_flags WHERE player = ? AND flag_key = ?");
+            if($stmt === false) return;
+            $stmt->bind_param("ss", $player, $key);
+            $stmt->execute();
+            $stmt->close();
+        }
+    }
+
+    public function clearPlayerFlags(string $player): void {
+        $player = strtolower($player);
+
+        if($this->type === "sqlite") {
+            $stmt = $this->database->prepare("DELETE FROM player_flags WHERE player = :player");
+            if($stmt === false) return;
+            $stmt->bindValue(":player", $player, SQLITE3_TEXT);
+            $stmt->execute();
+            $stmt->close();
+        } else {
+            $stmt = $this->database->prepare("DELETE FROM player_flags WHERE player = ?");
+            if($stmt === false) return;
+            $stmt->bind_param("s", $player);
+            $stmt->execute();
+            $stmt->close();
+        }
+    }
+
     public function close(): void {
         if($this->database !== null) {
             $this->database->close();
