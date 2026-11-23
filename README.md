@@ -1,3 +1,11 @@
+<div align="center">
+
+**[ 🇫🇷 Français ]** | [ 🇬🇧 English ](README.en.md)
+
+</div>
+
+---
+
 # CustomNPC 3.1.0
 
 Plugin de PNJ personnalisables pour **PocketMine-MP 5** (Minecraft Bedrock).
